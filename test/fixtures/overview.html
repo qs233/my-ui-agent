@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Overview Fixture</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+      }
+      .fixed-bar {
+        position: fixed;
+        z-index: 10;
+        inset: 0 0 auto 0;
+        height: 48px;
+        background: #222;
+        color: white;
+      }
+      .page {
+        padding: 72px 24px 24px;
+      }
+      .panel {
+        border: 1px solid #ccc;
+        padding: 16px;
+        width: 420px;
+      }
+      .scroll-box {
+        overflow-y: auto;
+        height: 90px;
+        border: 1px solid #888;
+      }
+      button,
+      input {
+        display: block;
+        margin-top: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="fixed-bar">App Bar</header>
+    <main class="page">
+      <section class="panel">
+        <h1>Account Settings</h1>
+        <label>
+          Display Name
+          <input name="displayName" value="Alice">
+        </label>
+        <button name="save">Save changes</button>
+        <div class="scroll-box">
+          <p>Scrollable row one</p>
+          <p>Scrollable row two</p>
+          <p>Scrollable row three</p>
+          <p>Scrollable row four</p>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
