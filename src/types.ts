@@ -1,40 +1,125 @@
-export type NodeKind = "ENTITY" | "ZONE";
+export type NodeKind = "ENTITY" | "LEAF" | "ZONE";
 
-export interface RawNode {
+export interface Bounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  area: number;
+}
+
+export interface SnapshotRareStringData {
+  index: number[];
+  value: number[];
+}
+
+export interface SnapshotNodeTable {
+  parentIndex?: number[];
+  nodeType?: number[];
+  nodeName?: number[];
+  nodeValue?: number[];
+  backendNodeId?: number[];
+  attributes?: number[][];
+  pseudoType?: SnapshotRareStringData;
+}
+
+export interface SnapshotLayoutTable {
+  nodeIndex?: number[];
+  bounds?: number[][];
+  text?: number[];
+  styles?: number[][];
+  paintOrders?: number[];
+}
+
+export interface SnapshotDocument {
+  nodes: SnapshotNodeTable;
+  layout: SnapshotLayoutTable;
+}
+
+export interface SnapshotResponse {
+  documents: SnapshotDocument[];
+  strings: string[];
+}
+
+export interface DecodedLayoutNodeBase {
+  nodeIndex: number;
+  parentElementNodeIndex: number | null;
+  bounds: Bounds;
+  paintOrder: number;
+}
+
+export interface DecodedLayoutElement extends DecodedLayoutNodeBase {
+  nodeType: 1;
+  backendNodeId: number;
+  tagName: string;
+  attributes: ReadonlyMap<string, string>;
+  styles: ReadonlyMap<string, string>;
+}
+
+export interface DecodedLayoutText extends DecodedLayoutNodeBase {
+  nodeType: 3;
+  sourceNodeType: 1 | 3;
+  text: string;
+}
+
+export type DecodedLayoutNode = DecodedLayoutElement | DecodedLayoutText;
+
+export interface RetainedLayoutElement extends DecodedLayoutElement {
+  readonly retained: true;
+}
+
+export interface RawNode extends Bounds {
   id: string;
   backendNodeId: number;
   tagName: string;
   className: string;
   name: string;
   text: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  area: number;
   paintOrder: number;
   domParentId: string | null;
   position: string;
   zIndex?: number;
-  isVisible: boolean;
   isInteractive: boolean;
   isScrollable: boolean;
 }
 
-export interface TreeNode extends RawNode {
-  type: NodeKind;
+export interface BaseCompressedNode extends RawNode {
   mergedDomIds: string[];
-  children: TreeNode[];
 }
 
-export interface CaptureOverviewOptions {
+export interface EntityNode extends BaseCompressedNode {
+  type: "ENTITY";
+  entityKind: "interactive" | "text";
+  semanticBounds: Bounds;
+}
+
+export interface LeafNode extends BaseCompressedNode {
+  type: "LEAF";
+  semanticBounds: Bounds;
+}
+
+export interface ZoneNode extends BaseCompressedNode {
+  type: "ZONE";
+}
+
+export type CompressedNode = EntityNode | LeafNode | ZoneNode;
+
+export type TreeNode =
+  | (EntityNode & { children: TreeNode[] })
+  | (LeafNode & { children: TreeNode[] })
+  | (ZoneNode & { children: TreeNode[] });
+
+export interface SnapshotOptions {
+  textMaxLength?: number;
+}
+
+export interface CaptureOverviewOptions extends SnapshotOptions {
   timeoutMs?: number;
   waitUntil?: "domcontentloaded" | "load" | "networkidle";
   viewport?: {
     width: number;
     height: number;
   };
-  textMaxLength?: number;
   keepBrowserOpen?: boolean;
 }
 

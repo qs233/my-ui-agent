@@ -34,6 +34,27 @@
         display: block;
         margin-top: 12px;
       }
+      .pseudo-label::before {
+        content: "Generated label";
+      }
+      .opacity-zero {
+        opacity: 0;
+      }
+      .content-hidden {
+        content-visibility: hidden;
+      }
+      .zero-parent {
+        position: relative;
+        width: 0;
+        height: 0;
+      }
+      .zero-parent button {
+        position: absolute;
+        left: 500px;
+        top: 0;
+        width: 140px;
+        height: 32px;
+      }
     </style>
   </head>
   <body>
@@ -53,6 +74,11 @@
           <p>Scrollable row four</p>
         </div>
       </section>
+      <div class="pseudo-label"></div>
+      <div class="opacity-zero"><button>Invisible action</button></div>
+      <div class="content-hidden"><span>Hidden content</span></div>
+      <div class="zero-parent"><button>Reparented action</button></div>
     </main>
+    <script>window.fixtureLoaded = true;</script>
   </body>
 </html>

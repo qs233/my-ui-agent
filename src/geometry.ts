@@ -1,8 +1,11 @@
-import type { TreeNode } from "./types.js";
+import type { CompressedNode } from "./types.js";
+
+type GeometryNode = Pick<CompressedNode, "x" | "y" | "width" | "height" | "area">;
+type MergeNode = Pick<CompressedNode, "x" | "y" | "width" | "height" | "area" | "paintOrder" | "type">;
 
 export function isApproximatelyContained(
-  node: Pick<TreeNode, "x" | "y" | "width" | "height" | "area">,
-  container: Pick<TreeNode, "x" | "y" | "width" | "height" | "area">,
+  node: GeometryNode,
+  container: GeometryNode,
   threshold = 0.8,
 ): boolean {
   if (node.area > container.area) return false;
@@ -20,7 +23,7 @@ export function isApproximatelyContained(
   return overlapArea / node.area >= threshold;
 }
 
-export function shouldMerge(child: TreeNode, parent: TreeNode): boolean {
+export function shouldMerge(child: MergeNode, parent: MergeNode): boolean {
   if (parent.paintOrder > child.paintOrder) return false;
 
   const deltaLeft = Math.abs(child.x - parent.x);
@@ -28,7 +31,7 @@ export function shouldMerge(child: TreeNode, parent: TreeNode): boolean {
   const deltaRight = Math.abs(child.x + child.width - (parent.x + parent.width));
   const deltaBottom = Math.abs(child.y + child.height - (parent.y + parent.height));
 
-  if (child.type === "ENTITY" || parent.type === "ENTITY") {
+  if (child.type !== "ZONE" || parent.type !== "ZONE") {
     const pixelThreshold = 4;
     return (
       deltaLeft <= pixelThreshold &&
