@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { compressDomTree } from "../src/compress.js";
-import { decodeSnapshot, prepareNodes } from "../src/prepare.js";
+import { decodeSnapshot, prepareNodes, rawNodesFromSnapshot } from "../src/prepare.js";
 import type {
   Bounds,
   DecodedLayoutElement,
@@ -70,6 +70,86 @@ test("prepareNodes assigns and joins usable layout text after filtering", () => 
 
   const raw = prepareNodes(decoded);
   assert.equal(raw.find((node) => node.id === "2")?.text, "Account settings");
+});
+
+test("rawNodesFromSnapshot prepares retained nodes directly from snapshot", () => {
+  const strings = [
+    "",
+    "#document",
+    "HTML",
+    "BODY",
+    "DIV",
+    "SPAN",
+    "BUTTON",
+    "#text",
+    "Submit",
+    "Generated",
+    "Hidden",
+    "::before",
+    "block",
+    "visible",
+    "1",
+    "static",
+    "auto",
+    "0",
+    "hidden",
+    "class",
+    "cta",
+  ];
+  const visibleStyles = [12, 13, 14, 13, 15, 16, 13, 13, 13, 16, 16];
+  const transparentStyles = [12, 13, 17, 13, 15, 16, 13, 13, 13, 16, 16];
+  const hiddenStyles = [12, 18, 14, 13, 15, 16, 13, 13, 13, 16, 16];
+  const snapshot: SnapshotResponse = {
+    strings,
+    documents: [{
+      nodes: {
+        parentIndex: [-1, 0, 1, 2, 3, 4, 5, 3, 7, 3, 9, 5, 11],
+        nodeType: [9, 1, 1, 1, 1, 1, 3, 1, 1, 1, 3, 1, 3],
+        nodeName: [1, 2, 3, 4, 5, 6, 7, 4, 6, 4, 7, 11, 7],
+        backendNodeId: [0, 1, 2, 3, 4, 5, 0, 7, 8, 9, 0, 11, 0],
+        attributes: [[], [], [], [], [], [19, 20], [], [], [], [], [], [], []],
+        pseudoType: { index: [11], value: [0] },
+      },
+      layout: {
+        nodeIndex: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        bounds: [
+          rect(0, 0, 400, 300),
+          rect(0, 0, 400, 300),
+          rect(0, 0, 400, 300),
+          rect(0, 0, 0, 0),
+          rect(20, 20, 120, 30),
+          rect(25, 25, 60, 20),
+          rect(0, 60, 120, 30),
+          rect(0, 60, 80, 20),
+          rect(0, 100, 120, 30),
+          rect(5, 105, 60, 20),
+          rect(20, 20, 70, 20),
+          rect(20, 20, 70, 20),
+        ],
+        text: [0, 0, 0, 0, 0, 8, 0, 0, 0, 10, 0, 9],
+        styles: [
+          visibleStyles,
+          visibleStyles,
+          visibleStyles,
+          visibleStyles,
+          visibleStyles,
+          [],
+          transparentStyles,
+          visibleStyles,
+          hiddenStyles,
+          [],
+          visibleStyles,
+          [],
+        ],
+        paintOrders: [1, 1, 1, 1, 2, 3, 2, 3, 2, 3, 3, 3],
+      },
+    }],
+  };
+
+  const raw = rawNodesFromSnapshot(snapshot);
+  assert.deepEqual(raw.map((node) => node.id), ["1", "2", "3", "5"]);
+  assert.equal(raw.find((node) => node.id === "5")?.domParentId, "3");
+  assert.equal(raw.find((node) => node.id === "5")?.text, "Submit Generated");
 });
 
 test("a retained element with no retained children becomes LEAF during compression", () => {

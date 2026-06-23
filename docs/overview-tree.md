@@ -20,7 +20,7 @@
 整体流程严格分为四步：
 
 1. **采集页面快照**：`captureSnapshot(page)` 只通过 CDP 获取主文档的 DOM、layout、paintOrder 和必要计算样式，输出 `SnapshotResponse`。
-2. **解码与准备节点**：`decodeSnapshot()` 将 layout 解码为 `DecodedLayoutElement | DecodedLayoutText`；`prepareNodes()` 完成可见性与尺寸过滤、文本归属和最近有效 parent 重写，输出不再带可见性标志的 `RawNode[]`。
+2. **准备原始节点**：主路径使用 `rawNodesFromSnapshot()` 直接从 `SnapshotResponse` 收集元素和文本候选，完成可见性与尺寸过滤、文本归属和最近有效 parent 重写，输出不再带可见性标志的 `RawNode[]`。`decodeSnapshot()` 和 `prepareNodes()` 仍保留为兼容、调试和单元测试用的分层 API。
 3. **压缩 DOM 层级**：`compressDomTree()` 恢复 retained DOM，归类 `ENTITY | LEAF | ZONE`，后序折叠单子包装层，输出 parent 已指向存活代表的扁平 `CompressedNode[]`。
 4. **构建视觉树**：`buildSpatialTree()` 只消费 `CompressedNode[]`，按面积从大到小处理，并分为两条路径：
    - **DOM 快路径**：沿 DOM 祖先向上查找已经进入视觉树的有效节点。只有同时满足空间包含和绘制顺序时才挂载；遇到空间断层或普通容器下的悬浮元素时立即停止。
@@ -32,8 +32,7 @@
 
 ```text
 captureSnapshot(page) → SnapshotResponse
-decodeSnapshot(snapshot) → DecodedLayoutNode[]
-prepareNodes(decoded) → RawNode[]
+rawNodesFromSnapshot(snapshot) → RawNode[]
 compressDomTree(raw) → CompressedNode[]
 buildSpatialTree(compressed) → TreeNode[]
 ```

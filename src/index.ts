@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import type { Page } from "playwright";
 import { compressDomTree } from "./compress.js";
-import { decodeSnapshot, prepareNodes } from "./prepare.js";
+import { rawNodesFromSnapshot } from "./prepare.js";
 import { captureSnapshot } from "./snapshot.js";
 import { buildSpatialTree } from "./tree.js";
 import type { CaptureOverviewOptions, RawNode, SnapshotOptions, TreeNode } from "./types.js";
@@ -35,7 +35,7 @@ export { buildSpatialTree } from "./tree.js";
 
 export async function captureRawNodes(page: Page, options: SnapshotOptions = {}): Promise<RawNode[]> {
   const snapshot = await captureSnapshot(page);
-  return prepareNodes(decodeSnapshot(snapshot), options);
+  return rawNodesFromSnapshot(snapshot, options);
 }
 
 export async function captureOverviewFromPage(page: Page, options: SnapshotOptions = {}): Promise<TreeNode[]> {
