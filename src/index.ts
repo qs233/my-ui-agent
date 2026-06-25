@@ -1,22 +1,20 @@
 import { chromium } from "playwright";
 import type { Page } from "playwright";
-import { compressDomTree } from "./compress.js";
+import { collapseDomTree } from "./compress.js";
 import { rawNodesFromSnapshot } from "./prepare.js";
 import { captureSnapshot } from "./snapshot.js";
-import { buildSpatialTree } from "./tree.js";
+import { buildVisualContainmentTree } from "./tree.js";
 import type { CaptureOverviewOptions, RawNode, SnapshotOptions, TreeNode } from "./types.js";
 
 export type {
-  BaseCompressedNode,
+  BaseCollapsedNode,
   Bounds,
   CaptureOverviewOptions,
-  CompressedNode,
+  CollapsedNode,
   DecodedLayoutElement,
   DecodedLayoutNode,
   DecodedLayoutText,
-  EntityNode,
   LeafNode,
-  NodeKind,
   RawNode,
   RetainedLayoutElement,
   SerializeOverviewOptions,
@@ -24,14 +22,13 @@ export type {
   SnapshotOptions,
   SnapshotResponse,
   TreeNode,
-  ZoneNode,
 } from "./types.js";
-export { isApproximatelyContained, shouldMerge } from "./geometry.js";
-export { compressDomTree } from "./compress.js";
+export { isApproximatelyContained } from "./geometry.js";
+export { collapseDomTree } from "./compress.js";
 export { decodeSnapshot, prepareNodes, rawNodesFromSnapshot } from "./prepare.js";
 export { captureSnapshot } from "./snapshot.js";
 export { serializeOverviewText } from "./serialize.js";
-export { buildSpatialTree } from "./tree.js";
+export { buildVisualContainmentTree } from "./tree.js";
 
 export async function captureRawNodes(page: Page, options: SnapshotOptions = {}): Promise<RawNode[]> {
   const snapshot = await captureSnapshot(page);
@@ -40,8 +37,8 @@ export async function captureRawNodes(page: Page, options: SnapshotOptions = {})
 
 export async function captureOverviewFromPage(page: Page, options: SnapshotOptions = {}): Promise<TreeNode[]> {
   const rawNodes = await captureRawNodes(page, options);
-  const compressedNodes = compressDomTree(rawNodes);
-  return buildSpatialTree(compressedNodes);
+  const collapsedNodes = collapseDomTree(rawNodes);
+  return buildVisualContainmentTree(collapsedNodes);
 }
 
 export async function captureOverview(url: string, options: CaptureOverviewOptions = {}): Promise<TreeNode[]> {

@@ -1,44 +1,34 @@
-import { shouldMerge } from "./geometry.js";
-import { appendText, normalizeText } from "./text.js";
-import type {
-  CompressedNode,
-  EntityNode,
-  LeafNode,
-  RawNode,
-  TreeNode,
-  ZoneNode,
-} from "./types.js";
+import type { CollapsedNode, RawNode, TreeNode } from "./types.js";
 
 interface RawDomNode {
   raw: RawNode;
   children: RawDomNode[];
 }
 
-interface CompressionState {
-  mergeBoundaries: Set<string>;
-}
-
-type SemanticTreeNode = Extract<TreeNode, { type: "ENTITY" | "LEAF" }>;
-
-const MERGE_BOUNDARY_TAGS = new Set([
+export const PRESERVE_COLLAPSE_BOUNDARY_TAGS = new Set([
   "svg",
-  "canvas",
   "img",
-  "picture",
   "video",
+  "canvas",
+  "picture",
   "audio",
   "iframe",
   "object",
   "embed",
   "math",
+  "button",
   "a",
+  "input",
+  "select",
+  "textarea",
   "form",
-  "dialog",
-  "details",
+  "option",
   "summary",
+  "details",
+  "dialog",
 ]);
 
-export function compressDomTree(rawNodes: RawNode[]): CompressedNode[] {
+export function collapseDomTree(rawNodes: RawNode[]): CollapsedNode[] {
   const rawMap = new Map<string, RawDomNode>();
   for (const raw of rawNodes) rawMap.set(raw.id, { raw: { ...raw }, children: [] });
 
@@ -50,128 +40,57 @@ export function compressDomTree(rawNodes: RawNode[]): CompressedNode[] {
   const roots = [...rawMap.values()].filter(
     (node) => !node.raw.domParentId || !rawMap.has(node.raw.domParentId),
   );
-  const state: CompressionState = { mergeBoundaries: new Set() };
-  const compressedRoots = roots.map((root) => compressPostOrder(root, state));
-  return flattenCompressedDom(compressedRoots);
+  const collapsedRoots = roots.map(collapsePostOrder);
+  return flattenCollapsedDom(collapsedRoots);
 }
 
-function compressPostOrder(rawNode: RawDomNode, state: CompressionState): TreeNode {
-  const children = rawNode.children.map((child) => compressPostOrder(child, state));
-  let node = classifyNode(rawNode.raw, children);
-
-  if (node.type === "ENTITY" && node.entityKind === "interactive") {
-    node.children = consumeTextEntities(node.children, node);
-  }
-
-  if (node.type === "ZONE" && node.children.length === 0) {
-    node = zoneToLeaf(node);
-  }
+function collapsePostOrder(rawNode: RawDomNode): TreeNode {
+  const children = rawNode.children.map(collapsePostOrder);
+  const node = classifyNode(rawNode.raw, children);
 
   if (node.children.length !== 1) return node;
   const child = node.children[0];
-  if (isMergeBoundaryParent(node, child)) return node;
-  if (!shouldMerge(child, node)) return node;
-
-  if (node.type === "ZONE" && (child.type === "ENTITY" || child.type === "LEAF")) {
-    if (state.mergeBoundaries.has(child.id)) return node;
-    return absorbZoneIntoSemanticNode(node, child, state);
-  }
-
-  if (node.type === "ZONE" && child.type === "ZONE") {
-    if (isLayoutBoundary(child)) return node;
-    return absorbZoneIntoZone(node, child);
-  }
-
-  return node;
+  if (!canCollapseSingleChildWrapper(node, child)) return node;
+  return collapseWrapperIntoChild(node, child);
 }
 
 function classifyNode(raw: RawNode, children: TreeNode[]): TreeNode {
   const base = {
     ...raw,
-    mergedDomIds: [raw.id],
+    wrapperDomIds: [],
     children,
   };
 
-  if (raw.isInteractive || normalizeText(raw.text)) {
-    return {
-      ...base,
-      type: "ENTITY",
-      entityKind: raw.isInteractive ? "interactive" : "text",
-      semanticBounds: boundsFromNode(raw),
-    };
-  }
-
   if (children.length === 0) {
-    return {
-      ...base,
-      type: "LEAF",
-      semanticBounds: boundsFromNode(raw),
-    };
+    return { ...base, type: "LEAF" };
   }
 
-  return { ...base, type: "ZONE" };
+  return base;
 }
 
-function absorbZoneIntoSemanticNode(
-  parent: TreeNode & ZoneNode,
-  child: SemanticTreeNode,
-  state: CompressionState,
-): SemanticTreeNode {
-  child.mergedDomIds = uniqueIds([...parent.mergedDomIds, ...child.mergedDomIds]);
+function canCollapseSingleChildWrapper(parent: TreeNode, child: TreeNode): boolean {
+  if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(parent.tagName)) return false;
+  if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(child.tagName)) return false;
+  if (isFloatingOutOfOrdinaryParent(child, parent)) return false;
+  if (parent.paintOrder > child.paintOrder) return false;
+  return isFullyContained(child, parent);
+}
+
+function collapseWrapperIntoChild(parent: TreeNode, child: TreeNode): TreeNode {
+  child.wrapperDomIds = [...parent.wrapperDomIds, parent.id, ...child.wrapperDomIds];
   child.domParentId = parent.domParentId;
   applyVisualBounds(child, parent);
   inheritLayoutProperties(child, parent);
-  if (isLayoutBoundary(parent)) state.mergeBoundaries.add(child.id);
   return child;
 }
 
-function absorbZoneIntoZone(parent: TreeNode & ZoneNode, child: TreeNode & ZoneNode): TreeNode & ZoneNode {
-  parent.mergedDomIds = uniqueIds([...parent.mergedDomIds, ...child.mergedDomIds]);
-  parent.children = child.children;
-  inheritLayoutProperties(parent, child);
-  return parent;
-}
-
-function consumeTextEntities(children: TreeNode[], owner: TreeNode & EntityNode): TreeNode[] {
-  const remaining: TreeNode[] = [];
-
-  for (let child of children) {
-    if (child.type === "ENTITY") {
-      if (child.entityKind === "interactive") {
-        remaining.push(child);
-        continue;
-      }
-
-      owner.text = mergeEntityText(owner.text, child.text);
-      owner.mergedDomIds = uniqueIds([...owner.mergedDomIds, ...child.mergedDomIds]);
-      remaining.push(...child.children);
-      continue;
-    }
-
-    child.children = consumeTextEntities(child.children, owner);
-    if (child.type === "ZONE" && child.children.length === 0) child = zoneToLeaf(child);
-    remaining.push(child);
-  }
-
-  return remaining;
-}
-
-function zoneToLeaf(zone: TreeNode & ZoneNode): TreeNode & LeafNode {
-  const { type: _type, ...rest } = zone;
-  return {
-    ...rest,
-    type: "LEAF",
-    semanticBounds: boundsFromNode(zone),
-  };
-}
-
-function flattenCompressedDom(roots: TreeNode[]): CompressedNode[] {
-  const flattened: CompressedNode[] = [];
+function flattenCollapsedDom(roots: TreeNode[]): CollapsedNode[] {
+  const flattened: CollapsedNode[] = [];
 
   function visit(node: TreeNode, parentId: string | null): void {
     node.domParentId = parentId;
-    const { children, ...compressed } = node;
-    flattened.push(cloneCompressedNode(compressed as CompressedNode));
+    const { children, ...collapsed } = node;
+    flattened.push(cloneCollapsedNode(collapsed as CollapsedNode));
     for (const child of children) visit(child, node.id);
   }
 
@@ -179,12 +98,8 @@ function flattenCompressedDom(roots: TreeNode[]): CompressedNode[] {
   return flattened;
 }
 
-function cloneCompressedNode(node: CompressedNode): CompressedNode {
-  const cloned = { ...node, mergedDomIds: [...node.mergedDomIds] };
-  if (cloned.type === "ENTITY" || cloned.type === "LEAF") {
-    cloned.semanticBounds = { ...cloned.semanticBounds };
-  }
-  return cloned;
+function cloneCollapsedNode(node: CollapsedNode): CollapsedNode {
+  return { ...node, wrapperDomIds: [...node.wrapperDomIds] };
 }
 
 function applyVisualBounds(target: TreeNode, source: TreeNode): void {
@@ -201,37 +116,20 @@ function inheritLayoutProperties(target: TreeNode, source: TreeNode): void {
   target.isScrollable = target.isScrollable || source.isScrollable;
 }
 
-function isLayoutBoundary(node: TreeNode): boolean {
-  return (
+function isFloatingOutOfOrdinaryParent(node: TreeNode, parent: TreeNode): boolean {
+  const isFloating =
     node.position === "fixed" ||
     node.position === "sticky" ||
-    node.isScrollable ||
-    node.zIndex !== undefined
+    (node.zIndex !== undefined && node.zIndex > 0);
+  if (!isFloating) return false;
+  return parent.position !== "fixed" && parent.position !== "sticky";
+}
+
+function isFullyContained(node: TreeNode, container: TreeNode): boolean {
+  return (
+    node.x >= container.x &&
+    node.y >= container.y &&
+    node.x + node.width <= container.x + container.width &&
+    node.y + node.height <= container.y + container.height
   );
-}
-
-function isMergeBoundaryParent(parent: TreeNode, child: TreeNode): boolean {
-  return MERGE_BOUNDARY_TAGS.has(parent.tagName) || (child.type === "ZONE" && MERGE_BOUNDARY_TAGS.has(child.tagName));
-}
-
-function mergeEntityText(current: string, next: string): string {
-  const normalizedCurrent = normalizeText(current);
-  const normalizedNext = normalizeText(next);
-  if (!normalizedNext || normalizedCurrent.includes(normalizedNext)) return normalizedCurrent;
-  if (!normalizedCurrent || normalizedNext.includes(normalizedCurrent)) return normalizedNext;
-  return appendText(normalizedCurrent, normalizedNext);
-}
-
-function boundsFromNode(node: RawNode) {
-  return {
-    x: node.x,
-    y: node.y,
-    width: node.width,
-    height: node.height,
-    area: node.area,
-  };
-}
-
-function uniqueIds(ids: string[]): string[] {
-  return [...new Set(ids)];
 }

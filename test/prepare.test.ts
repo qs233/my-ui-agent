@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compressDomTree } from "../src/compress.js";
+import { collapseDomTree } from "../src/compress.js";
 import { decodeSnapshot, prepareNodes, rawNodesFromSnapshot } from "../src/prepare.js";
 import type {
   Bounds,
@@ -152,15 +152,15 @@ test("rawNodesFromSnapshot prepares retained nodes directly from snapshot", () =
   assert.equal(raw.find((node) => node.id === "5")?.text, "Submit Generated");
 });
 
-test("a retained element with no retained children becomes LEAF during compression", () => {
+test("a retained element with no retained children becomes LEAF during collapse", () => {
   const raw = prepareNodes([
     element(1, null),
     element(2, 1, { width: 0, height: 0 }),
   ]);
-  const compressed = compressDomTree(raw);
+  const collapsed = collapseDomTree(raw);
 
-  assert.equal(compressed.length, 1);
-  assert.equal(compressed[0].type, "LEAF");
+  assert.equal(collapsed.length, 1);
+  assert.equal("type" in collapsed[0] ? collapsed[0].type : undefined, "LEAF");
 });
 
 function element(

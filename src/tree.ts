@@ -1,6 +1,6 @@
 import RBush from "rbush";
 import { isApproximatelyContained } from "./geometry.js";
-import type { CompressedNode, TreeNode } from "./types.js";
+import type { CollapsedNode, TreeNode } from "./types.js";
 
 interface SpatialItem {
   minX: number;
@@ -10,9 +10,9 @@ interface SpatialItem {
   node: TreeNode;
 }
 
-export function buildSpatialTree(compressedNodes: CompressedNode[]): TreeNode[] {
+export function buildVisualContainmentTree(collapsedNodes: CollapsedNode[]): TreeNode[] {
   const nodeMap = new Map<string, TreeNode>();
-  for (const node of compressedNodes) nodeMap.set(node.id, toTreeNode(node));
+  for (const node of collapsedNodes) nodeMap.set(node.id, toTreeNode(node));
 
   const finalNodes = [...nodeMap.values()].sort((a, b) => {
     const areaDelta = b.area - a.area;
@@ -41,12 +41,8 @@ export function buildSpatialTree(compressedNodes: CompressedNode[]): TreeNode[] 
   return roots;
 }
 
-function toTreeNode(node: CompressedNode): TreeNode {
-  const cloned = { ...node, mergedDomIds: [...node.mergedDomIds], children: [] };
-  if (cloned.type === "ENTITY" || cloned.type === "LEAF") {
-    cloned.semanticBounds = { ...cloned.semanticBounds };
-  }
-  return cloned;
+function toTreeNode(node: CollapsedNode): TreeNode {
+  return { ...node, wrapperDomIds: [...node.wrapperDomIds], children: [] };
 }
 
 function tryInsertByDomFastPath(

@@ -1,7 +1,6 @@
-import type { CompressedNode } from "./types.js";
+import type { CollapsedNode } from "./types.js";
 
-type GeometryNode = Pick<CompressedNode, "x" | "y" | "width" | "height" | "area">;
-type MergeNode = Pick<CompressedNode, "x" | "y" | "width" | "height" | "area" | "paintOrder" | "type">;
+type GeometryNode = Pick<CollapsedNode, "x" | "y" | "width" | "height" | "area">;
 
 export function isApproximatelyContained(
   node: GeometryNode,
@@ -21,33 +20,4 @@ export function isApproximatelyContained(
 
   if (overlapArea === 0 || node.area <= 0) return false;
   return overlapArea / node.area >= threshold;
-}
-
-export function shouldMerge(child: MergeNode, parent: MergeNode): boolean {
-  if (parent.paintOrder > child.paintOrder) return false;
-
-  const deltaLeft = Math.abs(child.x - parent.x);
-  const deltaTop = Math.abs(child.y - parent.y);
-  const deltaRight = Math.abs(child.x + child.width - (parent.x + parent.width));
-  const deltaBottom = Math.abs(child.y + child.height - (parent.y + parent.height));
-
-  if (child.type !== "ZONE" || parent.type !== "ZONE") {
-    const pixelThreshold = 4;
-    return (
-      deltaLeft <= pixelThreshold &&
-      deltaTop <= pixelThreshold &&
-      deltaRight <= pixelThreshold &&
-      deltaBottom <= pixelThreshold
-    );
-  }
-
-  const percentThreshold = 0.05;
-  const threshX = parent.width * percentThreshold;
-  const threshY = parent.height * percentThreshold;
-  return (
-    deltaLeft <= threshX &&
-    deltaTop <= threshY &&
-    deltaRight <= threshX &&
-    deltaBottom <= threshY
-  );
 }

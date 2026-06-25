@@ -21,7 +21,7 @@ function writeNode(lines: string[], node: TreeNode, depth: number, options: Seri
 }
 
 function formatNode(node: TreeNode, options: SerializeOverviewOptions): string {
-  const parts = [`${node.type}`, node.tagName];
+  const parts = [isLeafNode(node) ? `LEAF ${node.tagName}` : node.tagName];
 
   if (node.className) parts.push(`class=${quote(compactClassName(node.className))}`);
   if (node.name) parts.push(`name=${quote(node.name)}`);
@@ -29,6 +29,10 @@ function formatNode(node: TreeNode, options: SerializeOverviewOptions): string {
   if (node.isScrollable) parts.push("scroll");
 
   return parts.join(" ");
+}
+
+function isLeafNode(node: TreeNode): boolean {
+  return "type" in node && node.type === "LEAF";
 }
 
 function sortSpatially(nodes: TreeNode[]): TreeNode[] {

@@ -16,14 +16,15 @@ test("captureOverview builds a stable tree from a local page", { skip: !hasChrom
   });
   const text = serializeOverviewText(tree);
 
-  assert.match(text, /ZONE html/);
-  assert.match(text, /ENTITY button/);
-  assert.match(text, /ENTITY input/);
+  assert.match(text, /^body/m);
+  assert.match(text, /LEAF button/);
+  assert.match(text, /LEAF input/);
   assert.match(text, /scroll/);
   assert.match(text, /fixed-bar/);
-  assert.match(text, /ENTITY h1 text="Account Settings"/);
+  assert.match(text, /LEAF h1 text="Account Settings"/);
   assert.match(text, /Generated label/);
   assert.match(text, /Reparented action/);
+  assert.doesNotMatch(text, /\b(?:ENTITY|ZONE)\b/);
   assert.doesNotMatch(text, /Invisible action|Hidden content/);
   assert.doesNotMatch(text, /font-family|window\.fixtureLoaded|\.scroll-box\{/);
 });
@@ -48,8 +49,9 @@ test("captureOverview reads rendered content inside a shadow root", { skip: !has
     `);
     const text = serializeOverviewText(await captureOverviewFromPage(page));
 
-    assert.match(text, /ENTITY h2 text="Shadow title"/);
-    assert.match(text, /ENTITY button text="Shadow action"/);
+    assert.match(text, /LEAF h2 text="Shadow title"/);
+    assert.match(text, /LEAF button text="Shadow action"/);
+    assert.doesNotMatch(text, /\b(?:ENTITY|ZONE)\b/);
     assert.doesNotMatch(text, /width: 120px/);
   } finally {
     await browser.close();

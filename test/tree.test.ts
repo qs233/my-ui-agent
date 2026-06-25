@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compressDomTree } from "../src/compress.js";
-import { isApproximatelyContained, shouldMerge } from "../src/geometry.js";
-import { buildSpatialTree } from "../src/tree.js";
+import { collapseDomTree } from "../src/compress.js";
+import { isApproximatelyContained } from "../src/geometry.js";
+import { buildVisualContainmentTree } from "../src/tree.js";
 import { truncateText } from "../src/text.js";
-import type { CompressedNode, RawNode, TreeNode } from "../src/types.js";
+import type { RawNode, TreeNode } from "../src/types.js";
 
 test("isApproximatelyContained rejects larger children and accepts mostly contained nodes", () => {
   assert.equal(
@@ -24,283 +24,191 @@ test("isApproximatelyContained rejects larger children and accepts mostly contai
   );
 });
 
-test("shouldMerge uses tight pixel threshold for entity wrappers", () => {
-  const parent = zoneNode(node({ id: "p", width: 104, height: 44, paintOrder: 1 }));
-  const childRaw = node({
-    id: "c",
-    x: 2,
-    y: 2,
-    width: 100,
-    height: 40,
-    isInteractive: true,
-    paintOrder: 2,
-    domParentId: "p",
-  });
-  const child: CompressedNode = {
-    ...childRaw,
-    type: "ENTITY",
-    entityKind: "interactive",
-    semanticBounds: boundsFromRaw(childRaw),
-    mergedDomIds: [childRaw.id],
-  };
-
-  assert.equal(shouldMerge(child, parent), true);
-});
-
-test("buildSpatialTree keeps the semantic entity as the representative", () => {
-  const tree = buildOverviewTree([
-    node({ id: "root", tagName: "div", width: 200, height: 100, paintOrder: 1 }),
-    node({
-      id: "button",
-      tagName: "button",
-      width: 198,
-      height: 98,
-      x: 1,
-      y: 1,
-      paintOrder: 2,
-      domParentId: "root",
-      isInteractive: true,
-    }),
-  ]);
-
-  assert.equal(tree.length, 1);
-  assert.equal(tree[0].type, "ENTITY");
-  assert.equal(tree[0].id, "button");
-  assert.equal(tree[0].tagName, "button");
-  assert.equal(tree[0].width, 200);
-  assert.equal(tree[0].semanticBounds.width, 198);
-  assert.deepEqual(new Set(tree[0].mergedDomIds), new Set(["root", "button"]));
-});
-
-test("text nodes become text entities and keep their original tag", () => {
-  const tree = buildOverviewTree([
-    node({ id: "wrapper", width: 104, height: 44 }),
-    node({
-      id: "heading",
-      tagName: "h2",
-      text: "Account settings",
-      x: 2,
-      y: 2,
-      width: 100,
-      height: 40,
-      domParentId: "wrapper",
-      paintOrder: 2,
-    }),
-  ]);
-
-  assert.equal(tree.length, 1);
-  assert.equal(tree[0].type, "ENTITY");
-  assert.equal(tree[0].entityKind, "text");
-  assert.equal(tree[0].tagName, "h2");
-  assert.equal(tree[0].text, "Account settings");
-});
-
-test("interactive entities absorb descendant text entities", () => {
-  const tree = buildOverviewTree([
-    node({ id: "button", tagName: "button", width: 120, height: 40, isInteractive: true }),
+test("collapseDomTree collapses a fully containing single-child wrapper", () => {
+  const collapsed = collapseDomTree([
+    node({ id: "wrapper", tagName: "div", width: 120, height: 60, paintOrder: 1 }),
     node({
       id: "label",
       tagName: "span",
-      text: "Save changes",
+      text: "Account settings",
       x: 10,
       y: 10,
-      width: 90,
+      width: 80,
       height: 20,
-      domParentId: "button",
+      domParentId: "wrapper",
       paintOrder: 2,
     }),
   ]);
 
-  assert.equal(tree.length, 1);
-  assert.equal(tree[0].type, "ENTITY");
-  assert.equal(tree[0].entityKind, "interactive");
-  assert.equal(tree[0].tagName, "button");
-  assert.equal(tree[0].text, "Save changes");
-  assert.deepEqual(new Set(tree[0].mergedDomIds), new Set(["button", "label"]));
+  assert.equal(collapsed.length, 1);
+  assert.equal(collapsed[0].id, "label");
+  assert.equal(collapsed[0].tagName, "span");
+  assert.equal(leafType(collapsed[0]), "LEAF");
+  assert.deepEqual(collapsed[0].wrapperDomIds, ["wrapper"]);
+  assert.equal(collapsed[0].domParentId, null);
+  assert.equal(collapsed[0].x, 0);
+  assert.equal(collapsed[0].width, 120);
+  assert.equal(collapsed[0].text, "Account settings");
 });
 
-test("a sibling prevents a wrapper from collapsing into its entity", () => {
-  const tree = buildOverviewTree([
-    node({ id: "wrapper", width: 200, height: 100 }),
+test("collapseDomTree does not collapse approximate-only containment", () => {
+  const collapsed = collapseDomTree([
+    node({ id: "wrapper", tagName: "div", width: 100, height: 100, paintOrder: 1 }),
+    node({
+      id: "child",
+      tagName: "span",
+      x: -1,
+      width: 100,
+      height: 100,
+      domParentId: "wrapper",
+      paintOrder: 2,
+    }),
+  ]);
+
+  assert.equal(collapsed.some((item) => item.id === "wrapper"), true);
+  assert.equal(collapsed.find((item) => item.id === "child")?.domParentId, "wrapper");
+});
+
+test("collapseDomTree requires parent paint order before or equal to child", () => {
+  const collapsed = collapseDomTree([
+    node({ id: "wrapper", tagName: "div", width: 100, height: 100, paintOrder: 3 }),
+    node({
+      id: "child",
+      tagName: "span",
+      width: 100,
+      height: 100,
+      domParentId: "wrapper",
+      paintOrder: 2,
+    }),
+  ]);
+
+  assert.equal(collapsed.some((item) => item.id === "wrapper"), true);
+  assert.equal(collapsed.find((item) => item.id === "child")?.domParentId, "wrapper");
+});
+
+test("preserved tags block collapse as parent or child", () => {
+  const collapsed = collapseDomTree([
+    node({ id: "svg", tagName: "svg", width: 100, height: 100, paintOrder: 1 }),
+    node({ id: "path", tagName: "path", width: 100, height: 100, domParentId: "svg", paintOrder: 2 }),
+    node({ id: "wrapper", tagName: "div", x: 200, width: 100, height: 40, paintOrder: 1 }),
     node({
       id: "button",
       tagName: "button",
-      width: 198,
-      height: 98,
-      x: 1,
-      y: 1,
+      x: 200,
+      width: 100,
+      height: 40,
       domParentId: "wrapper",
       isInteractive: true,
       paintOrder: 2,
     }),
+    node({ id: "anchor", tagName: "a", x: 400, width: 100, height: 40, paintOrder: 1 }),
     node({
-      id: "decoration",
-      width: 20,
-      height: 20,
-      x: 10,
-      y: 10,
-      domParentId: "wrapper",
-      paintOrder: 2,
-    }),
-  ]);
-
-  assert.equal(tree[0].id, "wrapper");
-  const button = findNode(tree, "button");
-  assert.ok(button);
-  assert.deepEqual(button.mergedDomIds, ["button"]);
-});
-
-test("preserved tags are not collapsed into their only semantic child", () => {
-  const tree = buildOverviewTree([
-    node({ id: "svg", tagName: "svg", width: 100, height: 100, paintOrder: 1 }),
-    node({
-      id: "path",
-      tagName: "path",
+      id: "anchor-label",
+      tagName: "span",
+      text: "Settings",
+      x: 400,
       width: 100,
-      height: 100,
-      domParentId: "svg",
+      height: 40,
+      domParentId: "anchor",
       paintOrder: 2,
     }),
-  ]);
-
-  assert.equal(tree.length, 1);
-  assert.equal(tree[0].id, "svg");
-  assert.equal(tree[0].type, "ZONE");
-  assert.equal(tree[0].children[0]?.id, "path");
-  assert.equal(tree[0].children[0]?.type, "LEAF");
-});
-
-test("ordinary wrappers do not collapse preserved zone children", () => {
-  const compressed = compressDomTree([
-    node({ id: "wrapper", tagName: "div", width: 100, height: 100, paintOrder: 1 }),
-    node({
-      id: "svg",
-      tagName: "svg",
-      width: 100,
-      height: 100,
-      domParentId: "wrapper",
-      paintOrder: 2,
-    }),
-    node({
-      id: "path",
-      tagName: "path",
-      width: 50,
-      height: 50,
-      x: 25,
-      y: 25,
-      domParentId: "svg",
-      paintOrder: 3,
-    }),
-  ]);
-
-  assert.equal(compressed.some((item) => item.id === "svg"), true);
-  assert.equal(compressed.find((item) => item.id === "svg")?.domParentId, "wrapper");
-  assert.equal(compressed.find((item) => item.id === "path")?.domParentId, "svg");
-});
-
-test("form and anchor boundaries survive single-child compression", () => {
-  const compressed = compressDomTree([
-    node({ id: "form", tagName: "form", width: 100, height: 40, paintOrder: 1 }),
+    node({ id: "form", tagName: "form", x: 600, width: 100, height: 40, paintOrder: 1 }),
     node({
       id: "input",
       tagName: "input",
+      x: 600,
       width: 100,
       height: 40,
       domParentId: "form",
       isInteractive: true,
       paintOrder: 2,
     }),
-    node({ id: "anchor", tagName: "a", x: 200, width: 100, height: 40, paintOrder: 1 }),
+  ]);
+
+  assert.equal(collapsed.find((item) => item.id === "path")?.domParentId, "svg");
+  assert.equal(collapsed.find((item) => item.id === "button")?.domParentId, "wrapper");
+  assert.equal(collapsed.find((item) => item.id === "anchor-label")?.domParentId, "anchor");
+  assert.equal(collapsed.find((item) => item.id === "input")?.domParentId, "form");
+});
+
+test("collapsed wrapper IDs are outer-to-inner and exclude the representative node", () => {
+  const collapsed = collapseDomTree([
+    node({ id: "outer", tagName: "div", width: 120, height: 60, paintOrder: 1 }),
+    node({
+      id: "inner",
+      tagName: "div",
+      x: 10,
+      y: 10,
+      width: 90,
+      height: 30,
+      domParentId: "outer",
+      paintOrder: 2,
+    }),
     node({
       id: "label",
       tagName: "span",
-      text: "Settings",
-      x: 200,
-      width: 100,
-      height: 40,
-      domParentId: "anchor",
-      paintOrder: 2,
-    }),
-  ]);
-
-  assert.equal(compressed.find((item) => item.id === "form")?.type, "ZONE");
-  assert.equal(compressed.find((item) => item.id === "input")?.domParentId, "form");
-  assert.equal(compressed.find((item) => item.id === "anchor")?.type, "ZONE");
-  assert.equal(compressed.find((item) => item.id === "label")?.domParentId, "anchor");
-});
-
-test("a merged layout boundary prevents further ancestor collapse", () => {
-  const tree = buildOverviewTree([
-    node({ id: "outer", width: 108, height: 48 }),
-    node({
-      id: "fixed-wrapper",
-      x: 2,
-      y: 2,
-      width: 104,
-      height: 44,
-      domParentId: "outer",
-      position: "fixed",
-      zIndex: 10,
-      paintOrder: 2,
-    }),
-    node({
-      id: "button",
-      tagName: "button",
-      x: 4,
-      y: 4,
-      width: 100,
-      height: 40,
-      domParentId: "fixed-wrapper",
-      isInteractive: true,
+      x: 20,
+      y: 15,
+      width: 60,
+      height: 20,
+      domParentId: "inner",
       paintOrder: 3,
     }),
   ]);
 
-  const button = findNode(tree, "button");
-  assert.ok(button);
-  assert.equal(button.type, "ENTITY");
-  assert.equal(button.width, 104);
-  assert.equal(button.semanticBounds.width, 100);
-  assert.equal(button.position, "fixed");
-  assert.equal(button.zIndex, 10);
-  assert.equal(button.mergedDomIds.includes("fixed-wrapper"), true);
-  assert.equal(button.mergedDomIds.includes("outer"), false);
+  assert.equal(collapsed.length, 1);
+  assert.equal(collapsed[0].id, "label");
+  assert.deepEqual(collapsed[0].wrapperDomIds, ["outer", "inner"]);
+  assert.equal(collapsed[0].x, 0);
+  assert.equal(collapsed[0].width, 120);
 });
 
-test("compressDomTree rewrites parent IDs to surviving representatives", () => {
-  const compressed = compressDomTree([
-    node({ id: "outer", width: 300, height: 200 }),
-    node({ id: "wrapper", x: 20, y: 20, width: 104, height: 44, domParentId: "outer" }),
+test("collapsed representatives inherit wrapper layout properties", () => {
+  const collapsed = collapseDomTree([
+    node({ id: "fixed-wrapper", width: 120, height: 60, position: "fixed", zIndex: 10, paintOrder: 1 }),
     node({
-      id: "button",
-      tagName: "button",
-      x: 22,
-      y: 22,
-      width: 100,
-      height: 40,
-      domParentId: "wrapper",
-      isInteractive: true,
+      id: "label",
+      tagName: "span",
+      x: 10,
+      y: 10,
+      width: 80,
+      height: 20,
+      domParentId: "fixed-wrapper",
       paintOrder: 2,
     }),
   ]);
 
-  assert.equal(compressed.some((item) => item.id === "wrapper"), false);
-  assert.equal(compressed.find((item) => item.id === "button")?.domParentId, "outer");
+  assert.equal(collapsed[0].id, "label");
+  assert.equal(collapsed[0].position, "fixed");
+  assert.equal(collapsed[0].zIndex, 10);
 });
 
-test("buildSpatialTree allows contained parent and child to share paint order", () => {
-  const tree = buildOverviewTree([
-    node({ id: "parent", width: 200, height: 200, paintOrder: 1 }),
+test("ordinary wrappers do not collapse floating children", () => {
+  const collapsed = collapseDomTree([
+    node({ id: "body", tagName: "body", width: 1000, height: 1000, paintOrder: 1 }),
     node({
-      id: "child",
-      x: 20,
-      y: 20,
-      width: 80,
-      height: 80,
-      paintOrder: 1,
-      domParentId: "parent",
+      id: "modal",
+      tagName: "div",
+      x: 100,
+      y: 100,
+      width: 300,
+      height: 200,
+      domParentId: "body",
+      position: "fixed",
+      zIndex: 1000,
+      paintOrder: 2,
     }),
   ]);
+
+  assert.equal(collapsed.some((item) => item.id === "body"), true);
+  assert.equal(collapsed.find((item) => item.id === "modal")?.domParentId, "body");
+});
+
+test("buildVisualContainmentTree uses approximate containment for visual parents", () => {
+  const tree = buildVisualContainmentTree(collapseDomTree([
+    node({ id: "parent", tagName: "section", width: 200, height: 200, paintOrder: 1 }),
+    node({ id: "child", tagName: "div", x: -1, y: 20, width: 80, height: 80, paintOrder: 2 }),
+  ]));
 
   assert.equal(tree.length, 1);
   assert.equal(tree[0].id, "parent");
@@ -361,22 +269,10 @@ function node(overrides: Partial<RawNode>): RawNode {
 }
 
 function buildOverviewTree(rawNodes: RawNode[]): TreeNode[] {
-  return buildSpatialTree(compressDomTree(rawNodes));
+  return buildVisualContainmentTree(collapseDomTree(rawNodes));
 }
 
-function zoneNode(raw: RawNode): CompressedNode {
-  return { ...raw, type: "ZONE", mergedDomIds: [raw.id] };
-}
-
-function boundsFromRaw(raw: RawNode) {
-  return { x: raw.x, y: raw.y, width: raw.width, height: raw.height, area: raw.area };
-}
-
-function findNode(nodes: TreeNode[], id: string): TreeNode | undefined {
-  for (const current of nodes) {
-    if (current.id === id) return current;
-    const nested = findNode(current.children, id);
-    if (nested) return nested;
-  }
+function leafType(node: unknown): "LEAF" | undefined {
+  if (typeof node === "object" && node !== null && "type" in node && node.type === "LEAF") return "LEAF";
   return undefined;
 }

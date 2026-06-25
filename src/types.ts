@@ -1,5 +1,3 @@
-export type NodeKind = "ENTITY" | "LEAF" | "ZONE";
-
 export interface Bounds {
   x: number;
   y: number;
@@ -83,31 +81,17 @@ export interface RawNode extends Bounds {
   isScrollable: boolean;
 }
 
-export interface BaseCompressedNode extends RawNode {
-  mergedDomIds: string[];
+export interface BaseCollapsedNode extends RawNode {
+  wrapperDomIds: string[];
 }
 
-export interface EntityNode extends BaseCompressedNode {
-  type: "ENTITY";
-  entityKind: "interactive" | "text";
-  semanticBounds: Bounds;
-}
-
-export interface LeafNode extends BaseCompressedNode {
+export interface LeafNode extends BaseCollapsedNode {
   type: "LEAF";
-  semanticBounds: Bounds;
 }
 
-export interface ZoneNode extends BaseCompressedNode {
-  type: "ZONE";
-}
+export type CollapsedNode = BaseCollapsedNode | LeafNode;
 
-export type CompressedNode = EntityNode | LeafNode | ZoneNode;
-
-export type TreeNode =
-  | (EntityNode & { children: TreeNode[] })
-  | (LeafNode & { children: TreeNode[] })
-  | (ZoneNode & { children: TreeNode[] });
+export type TreeNode = CollapsedNode & { children: TreeNode[] };
 
 export interface SnapshotOptions {
   textMaxLength?: number;
