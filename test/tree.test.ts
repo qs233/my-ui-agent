@@ -150,6 +150,85 @@ test("a sibling prevents a wrapper from collapsing into its entity", () => {
   assert.deepEqual(button.mergedDomIds, ["button"]);
 });
 
+test("preserved tags are not collapsed into their only semantic child", () => {
+  const tree = buildOverviewTree([
+    node({ id: "svg", tagName: "svg", width: 100, height: 100, paintOrder: 1 }),
+    node({
+      id: "path",
+      tagName: "path",
+      width: 100,
+      height: 100,
+      domParentId: "svg",
+      paintOrder: 2,
+    }),
+  ]);
+
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0].id, "svg");
+  assert.equal(tree[0].type, "ZONE");
+  assert.equal(tree[0].children[0]?.id, "path");
+  assert.equal(tree[0].children[0]?.type, "LEAF");
+});
+
+test("ordinary wrappers do not collapse preserved zone children", () => {
+  const compressed = compressDomTree([
+    node({ id: "wrapper", tagName: "div", width: 100, height: 100, paintOrder: 1 }),
+    node({
+      id: "svg",
+      tagName: "svg",
+      width: 100,
+      height: 100,
+      domParentId: "wrapper",
+      paintOrder: 2,
+    }),
+    node({
+      id: "path",
+      tagName: "path",
+      width: 50,
+      height: 50,
+      x: 25,
+      y: 25,
+      domParentId: "svg",
+      paintOrder: 3,
+    }),
+  ]);
+
+  assert.equal(compressed.some((item) => item.id === "svg"), true);
+  assert.equal(compressed.find((item) => item.id === "svg")?.domParentId, "wrapper");
+  assert.equal(compressed.find((item) => item.id === "path")?.domParentId, "svg");
+});
+
+test("form and anchor boundaries survive single-child compression", () => {
+  const compressed = compressDomTree([
+    node({ id: "form", tagName: "form", width: 100, height: 40, paintOrder: 1 }),
+    node({
+      id: "input",
+      tagName: "input",
+      width: 100,
+      height: 40,
+      domParentId: "form",
+      isInteractive: true,
+      paintOrder: 2,
+    }),
+    node({ id: "anchor", tagName: "a", x: 200, width: 100, height: 40, paintOrder: 1 }),
+    node({
+      id: "label",
+      tagName: "span",
+      text: "Settings",
+      x: 200,
+      width: 100,
+      height: 40,
+      domParentId: "anchor",
+      paintOrder: 2,
+    }),
+  ]);
+
+  assert.equal(compressed.find((item) => item.id === "form")?.type, "ZONE");
+  assert.equal(compressed.find((item) => item.id === "input")?.domParentId, "form");
+  assert.equal(compressed.find((item) => item.id === "anchor")?.type, "ZONE");
+  assert.equal(compressed.find((item) => item.id === "label")?.domParentId, "anchor");
+});
+
 test("a merged layout boundary prevents further ancestor collapse", () => {
   const tree = buildOverviewTree([
     node({ id: "outer", width: 108, height: 48 }),

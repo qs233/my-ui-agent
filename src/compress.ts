@@ -20,6 +20,24 @@ interface CompressionState {
 
 type SemanticTreeNode = Extract<TreeNode, { type: "ENTITY" | "LEAF" }>;
 
+const MERGE_BOUNDARY_TAGS = new Set([
+  "svg",
+  "canvas",
+  "img",
+  "picture",
+  "video",
+  "audio",
+  "iframe",
+  "object",
+  "embed",
+  "math",
+  "a",
+  "form",
+  "dialog",
+  "details",
+  "summary",
+]);
+
 export function compressDomTree(rawNodes: RawNode[]): CompressedNode[] {
   const rawMap = new Map<string, RawDomNode>();
   for (const raw of rawNodes) rawMap.set(raw.id, { raw: { ...raw }, children: [] });
@@ -51,6 +69,7 @@ function compressPostOrder(rawNode: RawDomNode, state: CompressionState): TreeNo
 
   if (node.children.length !== 1) return node;
   const child = node.children[0];
+  if (isMergeBoundaryParent(node, child)) return node;
   if (!shouldMerge(child, node)) return node;
 
   if (node.type === "ZONE" && (child.type === "ENTITY" || child.type === "LEAF")) {
@@ -189,6 +208,10 @@ function isLayoutBoundary(node: TreeNode): boolean {
     node.isScrollable ||
     node.zIndex !== undefined
   );
+}
+
+function isMergeBoundaryParent(parent: TreeNode, child: TreeNode): boolean {
+  return MERGE_BOUNDARY_TAGS.has(parent.tagName) || (child.type === "ZONE" && MERGE_BOUNDARY_TAGS.has(child.tagName));
 }
 
 function mergeEntityText(current: string, next: string): string {
