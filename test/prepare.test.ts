@@ -56,6 +56,7 @@ test("prepareNodes filters rendered visibility and rewrites retained parents", (
   const raw = prepareNodes(decoded);
   assert.deepEqual(raw.map((node) => node.id), ["1", "3"]);
   assert.equal(raw.find((node) => node.id === "3")?.domParentId, "1");
+  assert.equal("backendNodeId" in raw[0], false);
 });
 
 test("prepareNodes assigns and joins usable layout text after filtering", () => {

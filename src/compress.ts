@@ -1,4 +1,4 @@
-import type { CollapsedNode, RawNode, TreeNode } from "./types.js";
+import type { CollapsedNode, CollapsedTreeNode, RawNode } from "./types.js";
 
 interface RawDomNode {
   raw: RawNode;
@@ -44,7 +44,7 @@ export function collapseDomTree(rawNodes: RawNode[]): CollapsedNode[] {
   return flattenCollapsedDom(collapsedRoots);
 }
 
-function collapsePostOrder(rawNode: RawDomNode): TreeNode {
+function collapsePostOrder(rawNode: RawDomNode): CollapsedTreeNode {
   const children = rawNode.children.map(collapsePostOrder);
   const node = classifyNode(rawNode.raw, children);
 
@@ -54,7 +54,7 @@ function collapsePostOrder(rawNode: RawDomNode): TreeNode {
   return collapseWrapperIntoChild(node, child);
 }
 
-function classifyNode(raw: RawNode, children: TreeNode[]): TreeNode {
+function classifyNode(raw: RawNode, children: CollapsedTreeNode[]): CollapsedTreeNode {
   const base = {
     ...raw,
     wrapperDomIds: [],
@@ -68,7 +68,7 @@ function classifyNode(raw: RawNode, children: TreeNode[]): TreeNode {
   return base;
 }
 
-function canCollapseSingleChildWrapper(parent: TreeNode, child: TreeNode): boolean {
+function canCollapseSingleChildWrapper(parent: CollapsedTreeNode, child: CollapsedTreeNode): boolean {
   if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(parent.tagName)) return false;
   if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(child.tagName)) return false;
   if (isFloatingOutOfOrdinaryParent(child, parent)) return false;
@@ -76,7 +76,7 @@ function canCollapseSingleChildWrapper(parent: TreeNode, child: TreeNode): boole
   return isFullyContained(child, parent);
 }
 
-function collapseWrapperIntoChild(parent: TreeNode, child: TreeNode): TreeNode {
+function collapseWrapperIntoChild(parent: CollapsedTreeNode, child: CollapsedTreeNode): CollapsedTreeNode {
   child.wrapperDomIds = [...parent.wrapperDomIds, parent.id, ...child.wrapperDomIds];
   child.domParentId = parent.domParentId;
   applyVisualBounds(child, parent);
@@ -84,10 +84,10 @@ function collapseWrapperIntoChild(parent: TreeNode, child: TreeNode): TreeNode {
   return child;
 }
 
-function flattenCollapsedDom(roots: TreeNode[]): CollapsedNode[] {
+function flattenCollapsedDom(roots: CollapsedTreeNode[]): CollapsedNode[] {
   const flattened: CollapsedNode[] = [];
 
-  function visit(node: TreeNode, parentId: string | null): void {
+  function visit(node: CollapsedTreeNode, parentId: string | null): void {
     node.domParentId = parentId;
     const { children, ...collapsed } = node;
     flattened.push(cloneCollapsedNode(collapsed as CollapsedNode));
@@ -102,7 +102,7 @@ function cloneCollapsedNode(node: CollapsedNode): CollapsedNode {
   return { ...node, wrapperDomIds: [...node.wrapperDomIds] };
 }
 
-function applyVisualBounds(target: TreeNode, source: TreeNode): void {
+function applyVisualBounds(target: CollapsedTreeNode, source: CollapsedTreeNode): void {
   target.x = source.x;
   target.y = source.y;
   target.width = source.width;
@@ -110,13 +110,13 @@ function applyVisualBounds(target: TreeNode, source: TreeNode): void {
   target.area = source.area;
 }
 
-function inheritLayoutProperties(target: TreeNode, source: TreeNode): void {
+function inheritLayoutProperties(target: CollapsedTreeNode, source: CollapsedTreeNode): void {
   if (source.position !== "static") target.position = source.position;
   if (source.zIndex !== undefined) target.zIndex = source.zIndex;
   target.isScrollable = target.isScrollable || source.isScrollable;
 }
 
-function isFloatingOutOfOrdinaryParent(node: TreeNode, parent: TreeNode): boolean {
+function isFloatingOutOfOrdinaryParent(node: CollapsedTreeNode, parent: CollapsedTreeNode): boolean {
   const isFloating =
     node.position === "fixed" ||
     node.position === "sticky" ||
@@ -125,7 +125,7 @@ function isFloatingOutOfOrdinaryParent(node: TreeNode, parent: TreeNode): boolea
   return parent.position !== "fixed" && parent.position !== "sticky";
 }
 
-function isFullyContained(node: TreeNode, container: TreeNode): boolean {
+function isFullyContained(node: CollapsedTreeNode, container: CollapsedTreeNode): boolean {
   return (
     node.x >= container.x &&
     node.y >= container.y &&

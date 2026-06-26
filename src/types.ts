@@ -68,7 +68,6 @@ export interface RetainedLayoutElement extends DecodedLayoutElement {
 
 export interface RawNode extends Bounds {
   id: string;
-  backendNodeId: number;
   tagName: string;
   className: string;
   name: string;
@@ -91,7 +90,29 @@ export interface LeafNode extends BaseCollapsedNode {
 
 export type CollapsedNode = BaseCollapsedNode | LeafNode;
 
-export type TreeNode = CollapsedNode & { children: TreeNode[] };
+export type CollapsedTreeNode = CollapsedNode & { children: CollapsedTreeNode[] };
+
+export type VctNode = CollapsedNode & {
+  children: VctNode[];
+  vctId: number;
+  vctParentId: number | null;
+  isReparented: boolean;
+  floating: boolean;
+  alignToId?: number;
+};
+
+export interface AlignmentResolverContext {
+  candidates: readonly VctNode[];
+}
+
+export type AlignmentResolver = (
+  node: VctNode,
+  context: AlignmentResolverContext,
+) => VctNode | undefined;
+
+export interface BuildVisualContainmentTreeOptions {
+  alignmentResolver?: AlignmentResolver;
+}
 
 export interface SnapshotOptions {
   textMaxLength?: number;

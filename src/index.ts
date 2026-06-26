@@ -4,10 +4,13 @@ import { collapseDomTree } from "./compress.js";
 import { rawNodesFromSnapshot } from "./prepare.js";
 import { captureSnapshot } from "./snapshot.js";
 import { buildVisualContainmentTree } from "./tree.js";
-import type { CaptureOverviewOptions, RawNode, SnapshotOptions, TreeNode } from "./types.js";
+import type { CaptureOverviewOptions, RawNode, SnapshotOptions, VctNode } from "./types.js";
 
 export type {
+  AlignmentResolver,
+  AlignmentResolverContext,
   BaseCollapsedNode,
+  BuildVisualContainmentTreeOptions,
   Bounds,
   CaptureOverviewOptions,
   CollapsedNode,
@@ -21,9 +24,9 @@ export type {
   SnapshotDocument,
   SnapshotOptions,
   SnapshotResponse,
-  TreeNode,
+  VctNode,
 } from "./types.js";
-export { isApproximatelyContained } from "./geometry.js";
+export { computeOverlapRatios, isApproximatelyContained } from "./geometry.js";
 export { collapseDomTree } from "./compress.js";
 export { decodeSnapshot, prepareNodes, rawNodesFromSnapshot } from "./prepare.js";
 export { captureSnapshot } from "./snapshot.js";
@@ -35,13 +38,13 @@ export async function captureRawNodes(page: Page, options: SnapshotOptions = {})
   return rawNodesFromSnapshot(snapshot, options);
 }
 
-export async function captureOverviewFromPage(page: Page, options: SnapshotOptions = {}): Promise<TreeNode[]> {
+export async function captureOverviewFromPage(page: Page, options: SnapshotOptions = {}): Promise<VctNode[]> {
   const rawNodes = await captureRawNodes(page, options);
   const collapsedNodes = collapseDomTree(rawNodes);
   return buildVisualContainmentTree(collapsedNodes);
 }
 
-export async function captureOverview(url: string, options: CaptureOverviewOptions = {}): Promise<TreeNode[]> {
+export async function captureOverview(url: string, options: CaptureOverviewOptions = {}): Promise<VctNode[]> {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({
     viewport: options.viewport ?? { width: 1280, height: 720 },

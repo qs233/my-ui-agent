@@ -114,7 +114,6 @@ export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: Snapsho
 
     rawNodes.push({
       id: String(element.backendNodeId),
-      backendNodeId: element.backendNodeId,
       tagName: element.tagName,
       className: truncateText(element.attributes.get("class") ?? "", textMaxLength),
       name: truncateText(element.attributes.get("name") ?? "", textMaxLength),
@@ -171,7 +170,6 @@ export function rawNodesFromSnapshot(snapshot: SnapshotResponse, options: Snapsh
 
     rawNodes.push({
       id: String(element.backendNodeId),
-      backendNodeId: element.backendNodeId,
       tagName: element.tagName,
       className: truncateText(element.attributes.get("class") ?? "", textMaxLength),
       name: truncateText(element.attributes.get("name") ?? "", textMaxLength),

@@ -1,12 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { collapseDomTree } from "../src/compress.js";
-import { isApproximatelyContained } from "../src/geometry.js";
+import { computeOverlapRatios, isApproximatelyContained } from "../src/geometry.js";
 import { buildVisualContainmentTree } from "../src/tree.js";
 import { truncateText } from "../src/text.js";
-import type { RawNode, TreeNode } from "../src/types.js";
+import type { RawNode, VctNode } from "../src/types.js";
 
-test("isApproximatelyContained rejects larger children and accepts mostly contained nodes", () => {
+test("overlap ratios distinguish full containment and approximate floating containment", () => {
+  const full = computeOverlapRatios(
+    { x: 10, y: 10, width: 20, height: 20, area: 400 },
+    { x: 0, y: 0, width: 100, height: 100, area: 10_000 },
+  );
+  assert.equal(full.isFullyContained, true);
+  assert.equal(full.childContainmentRatio, 1);
+  assert.equal(full.parentOccupancyRatio, 0.04);
+
+  const floating = computeOverlapRatios(
+    { x: -1, y: 20, width: 80, height: 80, area: 6_400 },
+    { x: 0, y: 0, width: 200, height: 200, area: 40_000 },
+  );
+  assert.equal(floating.isFullyContained, false);
+  assert.equal(floating.childContainmentRatio > 0.8, true);
+  assert.equal(floating.parentOccupancyRatio < 0.5, true);
+});
+
+test("isApproximatelyContained rejects larger children and high parent occupancy overflow", () => {
   assert.equal(
     isApproximatelyContained(
       { x: 0, y: 0, width: 100, height: 100, area: 10_000 },
@@ -21,6 +39,14 @@ test("isApproximatelyContained rejects larger children and accepts mostly contai
       { x: 0, y: 0, width: 100, height: 100, area: 10_000 },
     ),
     true,
+  );
+
+  assert.equal(
+    isApproximatelyContained(
+      { x: -1, y: 0, width: 100, height: 100, area: 10_000 },
+      { x: 0, y: 0, width: 100, height: 100, area: 10_000 },
+    ),
+    false,
   );
 });
 
@@ -213,6 +239,60 @@ test("buildVisualContainmentTree uses approximate containment for visual parents
   assert.equal(tree.length, 1);
   assert.equal(tree[0].id, "parent");
   assert.equal(tree[0].children[0]?.id, "child");
+  assert.equal(tree[0].vctId, 1);
+  assert.equal(tree[0].children[0]?.vctParentId, 1);
+  assert.equal(tree[0].children[0]?.floating, true);
+  assert.equal(tree[0].children[0]?.isReparented, true);
+});
+
+test("buildVisualContainmentTree keeps DOM parent metadata separate from VCT parent metadata", () => {
+  const tree = buildOverviewTree([
+    node({ id: "parent", tagName: "section", width: 200, height: 200, paintOrder: 1 }),
+    node({
+      id: "child",
+      tagName: "input",
+      x: 20,
+      y: 20,
+      width: 80,
+      height: 80,
+      domParentId: "parent",
+      paintOrder: 2,
+    }),
+  ]);
+
+  const child = tree[0].children[0];
+  assert.equal(tree[0].vctId, 1);
+  assert.equal(child?.vctId, 2);
+  assert.equal(child?.vctParentId, 1);
+  assert.equal(child?.domParentId, "parent");
+  assert.equal(child?.isReparented, false);
+  assert.equal(child?.floating, false);
+});
+
+test("alignment resolver only runs for reparented nodes", () => {
+  const tree = buildVisualContainmentTree(collapseDomTree([
+    node({ id: "body", tagName: "body", width: 300, height: 300, paintOrder: 1 }),
+    node({ id: "input", tagName: "input", width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
+    node({
+      id: "menu",
+      tagName: "div",
+      y: 20,
+      width: 100,
+      height: 80,
+      domParentId: "body",
+      position: "fixed",
+      zIndex: 10,
+      paintOrder: 3,
+    }),
+  ]));
+
+  const body = tree.find((item) => item.id === "body");
+  const input = body?.children.find((item) => item.id === "input");
+  const menu = tree.find((item) => item.id === "menu");
+  assert.equal(input?.isReparented, false);
+  assert.equal(input?.alignToId, undefined);
+  assert.equal(menu?.isReparented, true);
+  assert.equal(menu?.alignToId, input?.vctId);
 });
 
 test("fixed overlay is not swallowed by ordinary DOM parent", () => {
@@ -247,7 +327,6 @@ function node(overrides: Partial<RawNode>): RawNode {
   const height = overrides.height ?? 100;
   const raw: RawNode = {
     id: overrides.id ?? "n",
-    backendNodeId: Number(overrides.backendNodeId ?? 1),
     tagName: overrides.tagName ?? "div",
     className: overrides.className ?? "",
     name: overrides.name ?? "",
@@ -268,7 +347,7 @@ function node(overrides: Partial<RawNode>): RawNode {
   return raw;
 }
 
-function buildOverviewTree(rawNodes: RawNode[]): TreeNode[] {
+function buildOverviewTree(rawNodes: RawNode[]): VctNode[] {
   return buildVisualContainmentTree(collapseDomTree(rawNodes));
 }
 
