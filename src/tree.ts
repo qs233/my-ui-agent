@@ -46,7 +46,7 @@ export function buildVisualContainmentTree(
     inserted.set(node.id, node);
   }
 
-  finalizeVctMetadata(roots, options.alignmentResolver ?? defaultAlignmentResolver);
+  finalizeVctMetadata(roots, options.alignmentResolver);
   return roots;
 }
 
@@ -175,72 +175,89 @@ function insertSpatialNode(rtree: RBush<SpatialItem>, node: VctNode): void {
 
 function finalizeVctMetadata(
   roots: VctNode[],
-  alignmentResolver: AlignmentResolver,
+  alignmentResolver: AlignmentResolver | undefined,
 ): void {
   const ordered: VctNode[] = [];
+  const nodeById = new Map<string, VctNode>();
 
   function visit(node: VctNode, parent: VctNode | null): void {
     node.vctId = ordered.length + 1;
     node.vctParentId = parent?.vctId ?? null;
     node.isReparented = (parent?.id ?? null) !== node.ctParentId;
     ordered.push(node);
+    nodeById.set(node.id, node);
     for (const child of sortSpatially(node.children)) visit(child, node);
   }
 
   for (const root of sortSpatially(roots)) visit(root, null);
 
+  if (!alignmentResolver) return;
+
   for (const node of ordered) {
     if (!node.isReparented) continue;
-    const aligned = alignmentResolver(node, { candidates: ordered.filter((candidate) => candidate !== node) });
+    const aligned = alignmentResolver(node, { candidates: collectAlignmentCandidates(node, nodeById) });
     if (aligned) node.alignToId = aligned.vctId;
   }
 }
 
-function defaultAlignmentResolver(node: VctNode, context: { candidates: readonly VctNode[] }): VctNode | undefined {
-  let best: { node: VctNode; score: number } | undefined;
+function collectAlignmentCandidates(node: VctNode, nodeById: ReadonlyMap<string, VctNode>): VctNode[] {
+  if (!node.ctParentId) return [];
+  const ctParent = nodeById.get(node.ctParentId);
+  if (!ctParent) return [];
 
-  for (const candidate of context.candidates) {
-    if (candidate.paintOrder > node.paintOrder) continue;
-    if (isDescendantOf(candidate, node)) continue;
-    const score = alignmentScore(node, candidate);
-    if (score < 3) continue;
-    if (!best || score > best.score || (score === best.score && candidate.area < best.node.area)) {
-      best = { node: candidate, score };
-    }
-  }
-
-  return best?.node;
+  return ctParent.children
+    .filter((candidate) => candidate !== node)
+    .filter((candidate) => candidate.paintOrder <= node.paintOrder)
+    .sort((a, b) => compareAlignmentCandidates(node, a, b))
+    .slice(0, 5);
 }
 
-function isDescendantOf(candidate: VctNode, ancestor: VctNode): boolean {
-  for (const child of ancestor.children) {
-    if (child === candidate || isDescendantOf(candidate, child)) return true;
-  }
-  return false;
+function compareAlignmentCandidates(node: VctNode, a: VctNode, b: VctNode): number {
+  const scoreDelta = alignmentScore(node, b) - alignmentScore(node, a);
+  if (scoreDelta !== 0) return scoreDelta;
+
+  const verticalGapDelta = verticalGap(node, a) - verticalGap(node, b);
+  if (verticalGapDelta !== 0) return verticalGapDelta;
+
+  const horizontalDelta = horizontalAlignmentDelta(node, a) - horizontalAlignmentDelta(node, b);
+  if (horizontalDelta !== 0) return horizontalDelta;
+
+  return a.area - b.area;
 }
 
 function alignmentScore(node: VctNode, candidate: VctNode): number {
   const leftDelta = Math.abs(node.x - candidate.x);
   const widthDelta = Math.abs(node.width - candidate.width);
   const centerDelta = Math.abs(node.x + node.width / 2 - (candidate.x + candidate.width / 2));
-  const verticalGap = Math.min(
-    Math.abs(node.y - (candidate.y + candidate.height)),
-    Math.abs(candidate.y - (node.y + node.height)),
-  );
+  const adjacentVerticalGap = verticalGap(node, candidate);
   const horizontalOverlap = Math.max(
     0,
     Math.min(node.x + node.width, candidate.x + candidate.width) - Math.max(node.x, candidate.x),
   );
-  const isVerticallyAdjacent = verticalGap <= Math.max(12, Math.min(node.height, candidate.height));
+  const isVerticallyAdjacent = adjacentVerticalGap <= Math.max(12, Math.min(node.height, candidate.height));
   if (!isVerticallyAdjacent) return 0;
 
   let score = 0;
   if (leftDelta <= 4) score += 1;
   if (widthDelta <= Math.max(4, candidate.width * 0.05)) score += 1;
   if (centerDelta <= 4) score += 1;
-  if (verticalGap <= Math.max(8, Math.min(node.height, candidate.height) * 0.5)) score += 1;
+  if (adjacentVerticalGap <= Math.max(8, Math.min(node.height, candidate.height) * 0.5)) score += 1;
   if (horizontalOverlap / Math.max(1, Math.min(node.width, candidate.width)) >= 0.8) score += 1;
   return score;
+}
+
+function verticalGap(node: VctNode, candidate: VctNode): number {
+  return Math.min(
+    Math.abs(node.y - (candidate.y + candidate.height)),
+    Math.abs(candidate.y - (node.y + node.height)),
+  );
+}
+
+function horizontalAlignmentDelta(node: VctNode, candidate: VctNode): number {
+  const leftDelta = Math.abs(node.x - candidate.x);
+  const centerDelta = Math.abs(node.x + node.width / 2 - (candidate.x + candidate.width / 2));
+  const rightDelta = Math.abs(node.x + node.width - (candidate.x + candidate.width));
+  return Math.min(leftDelta, centerDelta, rightDelta);
 }
 
 function sortSpatially(nodes: VctNode[]): VctNode[] {

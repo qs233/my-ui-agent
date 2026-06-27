@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import type { Page } from "playwright";
 import { collapseDomTree } from "./compress.js";
-import { rawNodesFromSnapshot } from "./prepare.js";
+import { visibleNodesFromSnapshot } from "./prepare.js";
 import { captureSnapshot } from "./snapshot.js";
 import { buildVisualContainmentTree } from "./tree.js";
 import type {
@@ -37,18 +37,18 @@ export type {
 } from "./types.js";
 export { computeOverlapRatios, isApproximatelyContained } from "./geometry.js";
 export { collapseDomTree } from "./compress.js";
-export { decodeSnapshot, prepareNodes, rawNodesFromSnapshot } from "./prepare.js";
+export { decodeSnapshot, prepareNodes, visibleNodesFromSnapshot } from "./prepare.js";
 export { captureSnapshot } from "./snapshot.js";
 export { serializeOverviewText } from "./serialize.js";
 export { buildVisualContainmentTree } from "./tree.js";
 
-export async function captureRawNodes(page: Page, options: SnapshotOptions = {}): Promise<DomNodeRecord[]> {
+export async function captureVisibleNodes(page: Page, options: SnapshotOptions = {}): Promise<DomNodeRecord[]> {
   const snapshot = await captureSnapshot(page);
-  return rawNodesFromSnapshot(snapshot, options);
+  return visibleNodesFromSnapshot(snapshot, options);
 }
 
 export async function captureOverviewFromPage(page: Page, options: SnapshotOptions = {}): Promise<VctSnapshot> {
-  const domNodes = await captureRawNodes(page, options);
+  const domNodes = await captureVisibleNodes(page, options);
   const collapsedNodes = collapseDomTree(domNodes);
   return createVctSnapshot(domNodes, collapsedNodes);
 }

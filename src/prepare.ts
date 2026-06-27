@@ -134,7 +134,7 @@ export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: Snapsho
   return rawNodes;
 }
 
-export function rawNodesFromSnapshot(snapshot: SnapshotResponse, options: SnapshotOptions = {}): DomNodeRecord[] {
+export function visibleNodesFromSnapshot(snapshot: SnapshotResponse, options: SnapshotOptions = {}): DomNodeRecord[] {
   const document = snapshot.documents[0];
   if (!document) return [];
 

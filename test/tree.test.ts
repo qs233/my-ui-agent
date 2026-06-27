@@ -400,7 +400,7 @@ test("positive z-index alone does not force reparenting", () => {
   assert.equal(raised?.vctParentId, container?.vctId);
 });
 
-test("alignment resolver only runs for reparented nodes", () => {
+test("buildVisualContainmentTree does not align without an alignment resolver", () => {
   const tree = buildVisualContainmentTree(collapseDomTree([
     node({ id: "body", tagName: "body", width: 300, height: 300, paintOrder: 1 }),
     node({ id: "input", tagName: "input", width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
@@ -423,7 +423,112 @@ test("alignment resolver only runs for reparented nodes", () => {
   assert.equal(input?.isReparented, false);
   assert.equal(input?.alignToId, undefined);
   assert.equal(menu?.isReparented, true);
+  assert.equal(menu?.alignToId, undefined);
+});
+
+test("explicit alignment resolver only runs for reparented nodes", () => {
+  const resolvedNodeIds: string[] = [];
+  const tree = buildVisualContainmentTree(collapseDomTree([
+    node({ id: "body", tagName: "body", width: 300, height: 300, paintOrder: 1 }),
+    node({ id: "input", tagName: "input", width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
+    node({
+      id: "menu",
+      tagName: "div",
+      y: 20,
+      width: 100,
+      height: 80,
+      domParentId: "body",
+      position: "fixed",
+      zIndex: 10,
+      paintOrder: 3,
+    }),
+  ]), {
+    alignmentResolver: (nodeToAlign, context) => {
+      resolvedNodeIds.push(nodeToAlign.id);
+      return context.candidates[0];
+    },
+  });
+
+  const body = tree.find((item) => item.id === "body");
+  const input = body?.children.find((item) => item.id === "input");
+  const menu = tree.find((item) => item.id === "menu");
+  assert.deepEqual(resolvedNodeIds, ["menu"]);
+  assert.equal(input?.alignToId, undefined);
   assert.equal(menu?.alignToId, input?.vctId);
+});
+
+test("alignment resolver receives at most five local candidates", () => {
+  let candidateIds: string[] = [];
+
+  buildVisualContainmentTree(collapseDomTree([
+    node({ id: "body", tagName: "body", width: 500, height: 500, paintOrder: 1 }),
+    node({ id: "field-1", tagName: "input", x: 0, y: 0, width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
+    node({ id: "field-2", tagName: "input", x: 0, y: 20, width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
+    node({ id: "field-3", tagName: "input", x: 0, y: 40, width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
+    node({ id: "field-4", tagName: "input", x: 0, y: 60, width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
+    node({ id: "field-5", tagName: "input", x: 0, y: 80, width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
+    node({ id: "field-6", tagName: "input", x: 0, y: 100, width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
+    node({
+      id: "menu",
+      tagName: "div",
+      x: 0,
+      y: 120,
+      width: 100,
+      height: 80,
+      domParentId: "body",
+      position: "fixed",
+      zIndex: 10,
+      paintOrder: 3,
+    }),
+  ]), {
+    alignmentResolver: (_node, context) => {
+      candidateIds = context.candidates.map((candidate) => candidate.id);
+      return undefined;
+    },
+  });
+
+  assert.equal(candidateIds.length, 5);
+  assert.equal(candidateIds.includes("field-6"), true);
+});
+
+test("alignment candidates are limited to direct children of the collapsed tree parent", () => {
+  let candidateIds: string[] = [];
+
+  buildVisualContainmentTree(collapseDomTree([
+    node({ id: "body", tagName: "body", width: 500, height: 500, paintOrder: 1 }),
+    node({ id: "near-target", tagName: "input", x: 0, y: 0, width: 100, height: 20, domParentId: "body", paintOrder: 2 }),
+    node({ id: "container", tagName: "section", x: 200, y: 0, width: 200, height: 120, domParentId: "body", paintOrder: 2 }),
+    node({
+      id: "nested-target",
+      tagName: "input",
+      x: 200,
+      y: 20,
+      width: 100,
+      height: 20,
+      domParentId: "container",
+      paintOrder: 3,
+    }),
+    node({
+      id: "menu",
+      tagName: "div",
+      x: 0,
+      y: 20,
+      width: 100,
+      height: 80,
+      domParentId: "body",
+      position: "fixed",
+      zIndex: 10,
+      paintOrder: 4,
+    }),
+  ]), {
+    alignmentResolver: (_node, context) => {
+      candidateIds = context.candidates.map((candidate) => candidate.id);
+      return undefined;
+    },
+  });
+
+  assert.equal(candidateIds.includes("near-target"), true);
+  assert.equal(candidateIds.includes("nested-target"), false);
 });
 
 test("fixed overlay is not swallowed by ordinary DOM parent", () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { collapseDomTree } from "../src/compress.js";
-import { decodeSnapshot, prepareNodes, rawNodesFromSnapshot } from "../src/prepare.js";
+import { decodeSnapshot, prepareNodes, visibleNodesFromSnapshot } from "../src/prepare.js";
 import type {
   Bounds,
   DecodedLayoutElement,
@@ -87,7 +87,7 @@ test("prepareNodes marks maybe scroll regions from overflow styles", () => {
   assert.equal(raw.find((node) => node.id === "4")?.maybeScrollRegion, false);
 });
 
-test("rawNodesFromSnapshot prepares retained nodes directly from snapshot", () => {
+test("visibleNodesFromSnapshot prepares retained nodes directly from snapshot", () => {
   const strings = [
     "",
     "#document",
@@ -161,7 +161,7 @@ test("rawNodesFromSnapshot prepares retained nodes directly from snapshot", () =
     }],
   };
 
-  const raw = rawNodesFromSnapshot(snapshot);
+  const raw = visibleNodesFromSnapshot(snapshot);
   assert.deepEqual(raw.map((node) => node.id), ["1", "2", "3", "5"]);
   assert.equal(raw.find((node) => node.id === "5")?.parentId, "3");
   assert.equal(raw.find((node) => node.id === "5")?.text, "Submit Generated");
