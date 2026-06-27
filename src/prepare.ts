@@ -5,7 +5,7 @@ import type {
   DecodedLayoutElement,
   DecodedLayoutNode,
   DecodedLayoutText,
-  RawNode,
+  DomNodeRecord,
   RetainedLayoutElement,
   SnapshotDocument,
   SnapshotOptions,
@@ -75,7 +75,7 @@ export function decodeSnapshot(snapshot: SnapshotResponse): DecodedLayoutNode[] 
   return decoded;
 }
 
-export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: SnapshotOptions = {}): RawNode[] {
+export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: SnapshotOptions = {}): DomNodeRecord[] {
   const textMaxLength = options.textMaxLength ?? 80;
   const decodedElements = new Map<number, DecodedLayoutElement>();
   for (const node of decodedNodes) {
@@ -103,7 +103,7 @@ export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: Snapsho
     textByOwner.set(ownerNodeIndex, appendText(textByOwner.get(ownerNodeIndex) ?? "", node.text, textMaxLength));
   }
 
-  const rawNodes: RawNode[] = [];
+  const rawNodes: DomNodeRecord[] = [];
   for (const element of retainedElements.values()) {
     const parentNodeIndex = findNearestRetainedElement(
       element.parentElementNodeIndex,
@@ -114,13 +114,15 @@ export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: Snapsho
 
     rawNodes.push({
       id: String(element.backendNodeId),
+      parentId: parent ? String(parent.backendNodeId) : null,
+      childIds: [],
+      bounds: { ...element.bounds },
       tagName: element.tagName,
       className: truncateText(element.attributes.get("class") ?? "", textMaxLength),
       name: truncateText(element.attributes.get("name") ?? "", textMaxLength),
       text: textByOwner.get(element.nodeIndex) ?? "",
       ...element.bounds,
       paintOrder: element.paintOrder,
-      domParentId: parent ? String(parent.backendNodeId) : null,
       position: element.styles.get("position") ?? "static",
       zIndex: parseZIndex(element.styles.get("z-index")),
       isInteractive: isNativeInteractive(element),
@@ -128,10 +130,11 @@ export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: Snapsho
     });
   }
 
+  populateChildIds(rawNodes);
   return rawNodes;
 }
 
-export function rawNodesFromSnapshot(snapshot: SnapshotResponse, options: SnapshotOptions = {}): RawNode[] {
+export function rawNodesFromSnapshot(snapshot: SnapshotResponse, options: SnapshotOptions = {}): DomNodeRecord[] {
   const document = snapshot.documents[0];
   if (!document) return [];
 
@@ -159,7 +162,7 @@ export function rawNodesFromSnapshot(snapshot: SnapshotResponse, options: Snapsh
     textByOwner.set(ownerNodeIndex, appendText(textByOwner.get(ownerNodeIndex) ?? "", text.text, textMaxLength));
   }
 
-  const rawNodes: RawNode[] = [];
+  const rawNodes: DomNodeRecord[] = [];
   for (const element of retainedElements.values()) {
     const parentNodeIndex = findNearestRetainedSnapshotElement(
       readParentIndex(document, element.nodeIndex),
@@ -170,13 +173,15 @@ export function rawNodesFromSnapshot(snapshot: SnapshotResponse, options: Snapsh
 
     rawNodes.push({
       id: String(element.backendNodeId),
+      parentId: parent ? String(parent.backendNodeId) : null,
+      childIds: [],
+      bounds: { ...element.bounds },
       tagName: element.tagName,
       className: truncateText(element.attributes.get("class") ?? "", textMaxLength),
       name: truncateText(element.attributes.get("name") ?? "", textMaxLength),
       text: textByOwner.get(element.nodeIndex) ?? "",
       ...element.bounds,
       paintOrder: element.paintOrder,
-      domParentId: parent ? String(parent.backendNodeId) : null,
       position: element.styles.get("position") ?? "static",
       zIndex: parseZIndex(element.styles.get("z-index")),
       isInteractive: isNativeInteractive(element),
@@ -184,6 +189,7 @@ export function rawNodesFromSnapshot(snapshot: SnapshotResponse, options: Snapsh
     });
   }
 
+  populateChildIds(rawNodes);
   return rawNodes;
 }
 
@@ -429,6 +435,16 @@ function findNearestElementNodeIndex(
     current = readParentIndex(document, current);
   }
   return null;
+}
+
+function populateChildIds(nodes: DomNodeRecord[]): void {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  for (const node of nodes) node.childIds = [];
+
+  for (const node of nodes) {
+    if (!node.parentId) continue;
+    byId.get(node.parentId)?.childIds.push(node.id);
+  }
 }
 
 function readParentIndex(document: SnapshotDocument, nodeIndex: number): number | null {

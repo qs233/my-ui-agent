@@ -53,10 +53,13 @@ export function buildVisualContainmentTree(
 function toVctNode(node: CollapsedNode): VctNode {
   return {
     ...node,
-    wrapperDomIds: [...node.wrapperDomIds],
+    collapsedDomNodeIds: [...node.collapsedDomNodeIds],
+    visualBounds: { ...node.visualBounds },
+    ownBounds: { ...node.ownBounds },
     children: [],
     vctId: 0,
     vctParentId: null,
+    isCollapsed: node.collapsedDomNodeIds.length > 0,
     isReparented: false,
     floating: false,
   };
@@ -68,7 +71,7 @@ function tryInsertByDomFastPath(
   inserted: Map<string, VctNode>,
   rtree: RBush<SpatialItem>,
 ): boolean {
-  let currentParentId = node.domParentId;
+  let currentParentId = node.ctParentId;
 
   while (currentParentId) {
     const activeParent = nodeMap.get(currentParentId);
@@ -76,14 +79,12 @@ function tryInsertByDomFastPath(
 
     const potentialParent = inserted.get(activeParent.id);
     if (!potentialParent) {
-      currentParentId = activeParent.domParentId;
+      currentParentId = activeParent.ctParentId;
       continue;
     }
 
-    const isFixedOrSticky = node.position === "fixed" || node.position === "sticky";
-    const hasHighZIndex = node.zIndex !== undefined && node.zIndex > 0;
     if (
-      (isFixedOrSticky || hasHighZIndex) &&
+      isFixedOrSticky(node) &&
       potentialParent.position !== "fixed" &&
       potentialParent.position !== "sticky"
     ) {
@@ -126,12 +127,12 @@ function canUseAsVctParent(node: VctNode, candidate: VctNode): boolean {
 }
 
 function canUseAsVisualParent(node: VctNode, candidate: VctNode): boolean {
-  const isFloating =
-    node.position === "fixed" ||
-    node.position === "sticky" ||
-    (node.zIndex !== undefined && node.zIndex > 0);
-  if (!isFloating) return true;
+  if (!isFixedOrSticky(node)) return true;
   return candidate.position === "fixed" || candidate.position === "sticky";
+}
+
+function isFixedOrSticky(node: VctNode): boolean {
+  return node.position === "fixed" || node.position === "sticky";
 }
 
 export function insertIntoTreeWithApprox(parent: VctNode, node: VctNode): void {
@@ -181,7 +182,7 @@ function finalizeVctMetadata(
   function visit(node: VctNode, parent: VctNode | null): void {
     node.vctId = ordered.length + 1;
     node.vctParentId = parent?.vctId ?? null;
-    node.isReparented = (parent?.id ?? null) !== node.domParentId;
+    node.isReparented = (parent?.id ?? null) !== node.ctParentId;
     ordered.push(node);
     for (const child of sortSpatially(node.children)) visit(child, node);
   }

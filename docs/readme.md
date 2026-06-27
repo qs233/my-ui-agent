@@ -9,3 +9,6 @@ npm run build
 新项目没有锁文件时，用：
 npm install
 有 package-lock.json 时优先用 npm ci。
+
+# 运行
+npm run manual:overview

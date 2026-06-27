@@ -1,8 +1,9 @@
 import { truncateText } from "./text.js";
-import type { SerializeOverviewOptions, VctNode } from "./types.js";
+import type { SerializeOverviewOptions, VctNode, VctSnapshot } from "./types.js";
 
-export function serializeOverviewText(tree: VctNode[], options: SerializeOverviewOptions = {}): string {
+export function serializeOverviewText(input: VctSnapshot | VctNode[], options: SerializeOverviewOptions = {}): string {
   const lines: string[] = [];
+  const tree = Array.isArray(input) ? input : input.vctRoots;
   const sortedRoots = sortSpatially(tree);
   const vctIdByDomId = mapVctIdsByDomId(tree);
 
@@ -38,11 +39,12 @@ function formatNode(
   if (node.name) parts.push(`name=${quote(node.name)}`);
   if (node.text) parts.push(`text=${quote(truncateText(node.text, options.textMaxLength ?? 80))}`);
   if (node.isScrollable) parts.push("scroll");
+  if (node.isCollapsed) parts.push("collapsed");
   if (node.floating) parts.push("floating");
   if (node.isReparented) {
     parts.push("reparented");
-    const domParentVctId = node.domParentId ? vctIdByDomId.get(node.domParentId) : undefined;
-    if (domParentVctId !== undefined) parts.push(`dom_parent_id=${domParentVctId}`);
+    const parentVctId = node.ctParentId ? vctIdByDomId.get(node.ctParentId) : undefined;
+    if (parentVctId !== undefined) parts.push(`parent_id=${parentVctId}`);
   }
   if (node.alignToId !== undefined) parts.push(`align_to_id=${node.alignToId}`);
 

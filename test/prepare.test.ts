@@ -55,7 +55,7 @@ test("prepareNodes filters rendered visibility and rewrites retained parents", (
 
   const raw = prepareNodes(decoded);
   assert.deepEqual(raw.map((node) => node.id), ["1", "3"]);
-  assert.equal(raw.find((node) => node.id === "3")?.domParentId, "1");
+  assert.equal(raw.find((node) => node.id === "3")?.parentId, "1");
   assert.equal("backendNodeId" in raw[0], false);
 });
 
@@ -149,7 +149,7 @@ test("rawNodesFromSnapshot prepares retained nodes directly from snapshot", () =
 
   const raw = rawNodesFromSnapshot(snapshot);
   assert.deepEqual(raw.map((node) => node.id), ["1", "2", "3", "5"]);
-  assert.equal(raw.find((node) => node.id === "5")?.domParentId, "3");
+  assert.equal(raw.find((node) => node.id === "5")?.parentId, "3");
   assert.equal(raw.find((node) => node.id === "5")?.text, "Submit Generated");
 });
 

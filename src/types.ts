@@ -66,22 +66,41 @@ export interface RetainedLayoutElement extends DecodedLayoutElement {
   readonly retained: true;
 }
 
-export interface RawNode extends Bounds {
-  id: string;
+export type DomNodeId = string;
+
+export interface DomNodeRecord extends Bounds {
+  id: DomNodeId;
+  parentId: DomNodeId | null;
+  childIds: DomNodeId[];
+  bounds: Bounds;
   tagName: string;
   className: string;
   name: string;
   text: string;
   paintOrder: number;
-  domParentId: string | null;
   position: string;
   zIndex?: number;
   isInteractive: boolean;
   isScrollable: boolean;
 }
 
-export interface BaseCollapsedNode extends RawNode {
-  wrapperDomIds: string[];
+export interface RawNode extends DomNodeRecord {}
+
+export interface BaseCollapsedNode extends Bounds {
+  id: string;
+  representativeDomNodeId: DomNodeId;
+  collapsedDomNodeIds: DomNodeId[];
+  visualBounds: Bounds;
+  ownBounds: Bounds;
+  ctParentId: DomNodeId | null;
+  tagName: string;
+  className: string;
+  name: string;
+  text: string;
+  paintOrder: number;
+  position: string;
+  zIndex?: number;
+  isScrollable: boolean;
 }
 
 export interface LeafNode extends BaseCollapsedNode {
@@ -96,10 +115,17 @@ export type VctNode = CollapsedNode & {
   children: VctNode[];
   vctId: number;
   vctParentId: number | null;
+  isCollapsed: boolean;
   isReparented: boolean;
   floating: boolean;
   alignToId?: number;
 };
+
+export interface VctSnapshot {
+  domNodes: Map<DomNodeId, DomNodeRecord>;
+  collapsedNodes: Map<string, CollapsedNode>;
+  vctRoots: VctNode[];
+}
 
 export interface AlignmentResolverContext {
   candidates: readonly VctNode[];

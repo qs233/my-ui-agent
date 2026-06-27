@@ -1,8 +1,8 @@
-import type { CollapsedNode, CollapsedTreeNode, RawNode } from "./types.js";
+import type { CollapsedNode, CollapsedTreeNode, DomNodeRecord } from "./types.js";
 
-interface RawDomNode {
-  raw: RawNode;
-  children: RawDomNode[];
+interface DomTreeNode {
+  record: DomNodeRecord;
+  children: DomTreeNode[];
 }
 
 export const PRESERVE_COLLAPSE_BOUNDARY_TAGS = new Set([
@@ -28,25 +28,25 @@ export const PRESERVE_COLLAPSE_BOUNDARY_TAGS = new Set([
   "dialog",
 ]);
 
-export function collapseDomTree(rawNodes: RawNode[]): CollapsedNode[] {
-  const rawMap = new Map<string, RawDomNode>();
-  for (const raw of rawNodes) rawMap.set(raw.id, { raw: { ...raw }, children: [] });
+export function collapseDomTree(domNodes: DomNodeRecord[]): CollapsedNode[] {
+  const domMap = new Map<string, DomTreeNode>();
+  for (const record of domNodes) domMap.set(record.id, { record: { ...record, childIds: [...record.childIds] }, children: [] });
 
-  for (const node of rawMap.values()) {
-    if (!node.raw.domParentId) continue;
-    rawMap.get(node.raw.domParentId)?.children.push(node);
+  for (const node of domMap.values()) {
+    if (!node.record.parentId) continue;
+    domMap.get(node.record.parentId)?.children.push(node);
   }
 
-  const roots = [...rawMap.values()].filter(
-    (node) => !node.raw.domParentId || !rawMap.has(node.raw.domParentId),
+  const roots = [...domMap.values()].filter(
+    (node) => !node.record.parentId || !domMap.has(node.record.parentId),
   );
   const collapsedRoots = roots.map(collapsePostOrder);
   return flattenCollapsedDom(collapsedRoots);
 }
 
-function collapsePostOrder(rawNode: RawDomNode): CollapsedTreeNode {
-  const children = rawNode.children.map(collapsePostOrder);
-  const node = classifyNode(rawNode.raw, children);
+function collapsePostOrder(domNode: DomTreeNode): CollapsedTreeNode {
+  const children = domNode.children.map(collapsePostOrder);
+  const node = classifyNode(domNode.record, children);
 
   if (node.children.length !== 1) return node;
   const child = node.children[0];
@@ -54,10 +54,27 @@ function collapsePostOrder(rawNode: RawDomNode): CollapsedTreeNode {
   return collapseWrapperIntoChild(node, child);
 }
 
-function classifyNode(raw: RawNode, children: CollapsedTreeNode[]): CollapsedTreeNode {
+function classifyNode(record: DomNodeRecord, children: CollapsedTreeNode[]): CollapsedTreeNode {
   const base = {
-    ...raw,
-    wrapperDomIds: [],
+    id: record.id,
+    representativeDomNodeId: record.id,
+    collapsedDomNodeIds: [],
+    visualBounds: { ...record.bounds },
+    ownBounds: { ...record.bounds },
+    x: record.bounds.x,
+    y: record.bounds.y,
+    width: record.bounds.width,
+    height: record.bounds.height,
+    area: record.bounds.area,
+    ctParentId: record.parentId,
+    tagName: record.tagName,
+    className: record.className,
+    name: record.name,
+    text: record.text,
+    paintOrder: record.paintOrder,
+    position: record.position,
+    zIndex: record.zIndex,
+    isScrollable: record.isScrollable,
     children,
   };
 
@@ -71,14 +88,19 @@ function classifyNode(raw: RawNode, children: CollapsedTreeNode[]): CollapsedTre
 function canCollapseSingleChildWrapper(parent: CollapsedTreeNode, child: CollapsedTreeNode): boolean {
   if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(parent.tagName)) return false;
   if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(child.tagName)) return false;
-  if (isFloatingOutOfOrdinaryParent(child, parent)) return false;
+  if (shouldPreservePositionedBoundary(parent, child)) return false;
+  if (parent.isScrollable || child.isScrollable) return false;
   if (parent.paintOrder > child.paintOrder) return false;
   return isFullyContained(child, parent);
 }
 
 function collapseWrapperIntoChild(parent: CollapsedTreeNode, child: CollapsedTreeNode): CollapsedTreeNode {
-  child.wrapperDomIds = [...parent.wrapperDomIds, parent.id, ...child.wrapperDomIds];
-  child.domParentId = parent.domParentId;
+  child.collapsedDomNodeIds = [
+    ...parent.collapsedDomNodeIds,
+    parent.representativeDomNodeId,
+    ...child.collapsedDomNodeIds,
+  ];
+  child.ctParentId = parent.ctParentId;
   applyVisualBounds(child, parent);
   inheritLayoutProperties(child, parent);
   return child;
@@ -88,7 +110,7 @@ function flattenCollapsedDom(roots: CollapsedTreeNode[]): CollapsedNode[] {
   const flattened: CollapsedNode[] = [];
 
   function visit(node: CollapsedTreeNode, parentId: string | null): void {
-    node.domParentId = parentId;
+    node.ctParentId = parentId;
     const { children, ...collapsed } = node;
     flattened.push(cloneCollapsedNode(collapsed as CollapsedNode));
     for (const child of children) visit(child, node.id);
@@ -99,37 +121,41 @@ function flattenCollapsedDom(roots: CollapsedTreeNode[]): CollapsedNode[] {
 }
 
 function cloneCollapsedNode(node: CollapsedNode): CollapsedNode {
-  return { ...node, wrapperDomIds: [...node.wrapperDomIds] };
+  return {
+    ...node,
+    collapsedDomNodeIds: [...node.collapsedDomNodeIds],
+    visualBounds: { ...node.visualBounds },
+    ownBounds: { ...node.ownBounds },
+  };
 }
 
 function applyVisualBounds(target: CollapsedTreeNode, source: CollapsedTreeNode): void {
-  target.x = source.x;
-  target.y = source.y;
-  target.width = source.width;
-  target.height = source.height;
-  target.area = source.area;
+  target.visualBounds = { ...source.visualBounds };
+  target.x = source.visualBounds.x;
+  target.y = source.visualBounds.y;
+  target.width = source.visualBounds.width;
+  target.height = source.visualBounds.height;
+  target.area = source.visualBounds.area;
 }
 
 function inheritLayoutProperties(target: CollapsedTreeNode, source: CollapsedTreeNode): void {
   if (source.position !== "static") target.position = source.position;
   if (source.zIndex !== undefined) target.zIndex = source.zIndex;
-  target.isScrollable = target.isScrollable || source.isScrollable;
 }
 
-function isFloatingOutOfOrdinaryParent(node: CollapsedTreeNode, parent: CollapsedTreeNode): boolean {
-  const isFloating =
-    node.position === "fixed" ||
-    node.position === "sticky" ||
-    (node.zIndex !== undefined && node.zIndex > 0);
-  if (!isFloating) return false;
-  return parent.position !== "fixed" && parent.position !== "sticky";
+function shouldPreservePositionedBoundary(parent: CollapsedTreeNode, child: CollapsedTreeNode): boolean {
+  return isFixedOrSticky(parent) || isFixedOrSticky(child);
+}
+
+function isFixedOrSticky(node: CollapsedTreeNode): boolean {
+  return node.position === "fixed" || node.position === "sticky";
 }
 
 function isFullyContained(node: CollapsedTreeNode, container: CollapsedTreeNode): boolean {
   return (
-    node.x >= container.x &&
-    node.y >= container.y &&
-    node.x + node.width <= container.x + container.width &&
-    node.y + node.height <= container.y + container.height
+    node.visualBounds.x >= container.visualBounds.x &&
+    node.visualBounds.y >= container.visualBounds.y &&
+    node.visualBounds.x + node.visualBounds.width <= container.visualBounds.x + container.visualBounds.width &&
+    node.visualBounds.y + node.visualBounds.height <= container.visualBounds.y + container.visualBounds.height
   );
 }
