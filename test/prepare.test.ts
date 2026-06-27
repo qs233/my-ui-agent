@@ -73,6 +73,20 @@ test("prepareNodes assigns and joins usable layout text after filtering", () => 
   assert.equal(raw.find((node) => node.id === "2")?.text, "Account settings");
 });
 
+test("prepareNodes marks maybe scroll regions from overflow styles", () => {
+  const raw = prepareNodes([
+    element(1, null, { styles: styleMap({ overflow: "auto" }) }),
+    element(2, 1, { styles: styleMap({ "overflow-x": "scroll" }) }),
+    element(3, 1, { styles: styleMap({ "overflow-y": "hidden" }) }),
+    element(4, 1, { styles: styleMap({ overflow: "visible" }) }),
+  ]);
+
+  assert.equal(raw.find((node) => node.id === "1")?.maybeScrollRegion, true);
+  assert.equal(raw.find((node) => node.id === "2")?.maybeScrollRegion, true);
+  assert.equal(raw.find((node) => node.id === "3")?.maybeScrollRegion, true);
+  assert.equal(raw.find((node) => node.id === "4")?.maybeScrollRegion, false);
+});
+
 test("rawNodesFromSnapshot prepares retained nodes directly from snapshot", () => {
   const strings = [
     "",

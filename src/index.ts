@@ -79,3 +79,48 @@ function createVctSnapshot(domNodes: DomNodeRecord[], collapsedNodes: CollapsedN
     vctRoots: buildVisualContainmentTree(collapsedNodes),
   };
 }
+
+export async function hasScrollableOverflow(page: Page, domNodeId: string): Promise<boolean> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    const backendNodeId = Number(domNodeId);
+    if (!Number.isFinite(backendNodeId)) return false;
+
+    const resolved = await session.send("DOM.resolveNode", {
+      backendNodeId,
+      objectGroup: "scroll-metrics",
+    });
+    const objectId = resolved.object.objectId;
+    if (!objectId) return false;
+
+    const result = await session.send("Runtime.callFunctionOn", {
+      objectId,
+      returnByValue: true,
+      functionDeclaration: `function () {
+        return {
+          clientWidth: this.clientWidth,
+          clientHeight: this.clientHeight,
+          scrollWidth: this.scrollWidth,
+          scrollHeight: this.scrollHeight
+        };
+      }`,
+    });
+
+    const metrics = result.result.value as ScrollMetrics | undefined;
+    if (!metrics) return false;
+    return (
+      metrics.scrollWidth > metrics.clientWidth + 1 ||
+      metrics.scrollHeight > metrics.clientHeight + 1
+    );
+  } finally {
+    await session.send("Runtime.releaseObjectGroup", { objectGroup: "scroll-metrics" }).catch(() => undefined);
+    await session.detach().catch(() => undefined);
+  }
+}
+
+interface ScrollMetrics {
+  clientWidth: number;
+  clientHeight: number;
+  scrollWidth: number;
+  scrollHeight: number;
+}

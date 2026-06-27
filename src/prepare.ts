@@ -126,7 +126,7 @@ export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: Snapsho
       position: element.styles.get("position") ?? "static",
       zIndex: parseZIndex(element.styles.get("z-index")),
       isInteractive: isNativeInteractive(element),
-      isScrollable: isScrollable(element.styles),
+      maybeScrollRegion: isMaybeScrollRegion(element.styles),
     });
   }
 
@@ -185,7 +185,7 @@ export function rawNodesFromSnapshot(snapshot: SnapshotResponse, options: Snapsh
       position: element.styles.get("position") ?? "static",
       zIndex: parseZIndex(element.styles.get("z-index")),
       isInteractive: isNativeInteractive(element),
-      isScrollable: isScrollable(element.styles),
+      maybeScrollRegion: isMaybeScrollRegion(element.styles),
     });
   }
 
@@ -480,9 +480,9 @@ function isNativeInteractive(element: Pick<DecodedLayoutElement, "attributes" | 
   return element.tagName === "a" && element.attributes.has("href");
 }
 
-function isScrollable(styles: ReadonlyMap<string, string>): boolean {
+function isMaybeScrollRegion(styles: ReadonlyMap<string, string>): boolean {
   const values = [styles.get("overflow"), styles.get("overflow-x"), styles.get("overflow-y")];
-  return values.some((value) => value === "auto" || value === "scroll");
+  return values.some((value) => value === "auto" || value === "scroll" || value === "hidden");
 }
 
 function parseZIndex(value: string | undefined): number | undefined {

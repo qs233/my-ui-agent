@@ -81,7 +81,7 @@ export interface DomNodeRecord extends Bounds {
   position: string;
   zIndex?: number;
   isInteractive: boolean;
-  isScrollable: boolean;
+  maybeScrollRegion: boolean;
 }
 
 export interface RawNode extends DomNodeRecord {}
@@ -100,7 +100,7 @@ export interface BaseCollapsedNode extends Bounds {
   paintOrder: number;
   position: string;
   zIndex?: number;
-  isScrollable: boolean;
+  maybeScrollRegion: boolean;
 }
 
 export interface LeafNode extends BaseCollapsedNode {

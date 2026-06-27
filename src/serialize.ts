@@ -38,7 +38,7 @@ function formatNode(
   if (node.className) parts.push(`class=${quote(compactClassName(node.className))}`);
   if (node.name) parts.push(`name=${quote(node.name)}`);
   if (node.text) parts.push(`text=${quote(truncateText(node.text, options.textMaxLength ?? 80))}`);
-  if (node.isScrollable) parts.push("scroll");
+  if (node.maybeScrollRegion) parts.push("maybe-scroll");
   if (node.isCollapsed) parts.push("collapsed");
   if (node.floating) parts.push("floating");
   if (node.isReparented) {

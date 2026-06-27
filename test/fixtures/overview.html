@@ -29,6 +29,19 @@
         height: 90px;
         border: 1px solid #888;
       }
+      .hidden-scroll-box {
+        overflow: hidden;
+        height: 36px;
+        border: 1px solid #884;
+      }
+      .hidden-scroll-box .tall-content {
+        height: 96px;
+      }
+      .quiet-scroll-box {
+        overflow: auto;
+        height: 120px;
+        border: 1px solid #488;
+      }
       button,
       input {
         display: block;
@@ -72,6 +85,12 @@
           <p>Scrollable row two</p>
           <p>Scrollable row three</p>
           <p>Scrollable row four</p>
+        </div>
+        <div class="hidden-scroll-box">
+          <div class="tall-content">Hidden overflow content</div>
+        </div>
+        <div class="quiet-scroll-box">
+          <p>Quiet scroll content</p>
         </div>
       </section>
       <div class="pseudo-label"></div>

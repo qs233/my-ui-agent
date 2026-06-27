@@ -267,9 +267,9 @@ test("fixed or sticky nodes are preserved as collapse boundaries", () => {
   assert.equal(collapsed.find((item) => item.id === "sticky-child")?.ctParentId, "sticky");
 });
 
-test("scrollable nodes are preserved as collapse boundaries", () => {
+test("maybe scroll region nodes are preserved as collapse boundaries", () => {
   const collapsed = collapseDomTree([
-    node({ id: "scroll-parent", tagName: "div", width: 100, height: 100, isScrollable: true, paintOrder: 1 }),
+    node({ id: "scroll-parent", tagName: "div", width: 100, height: 100, maybeScrollRegion: true, paintOrder: 1 }),
     node({ id: "child", tagName: "span", width: 100, height: 100, domParentId: "scroll-parent", paintOrder: 2 }),
     node({ id: "parent", tagName: "div", x: 200, width: 100, height: 100, paintOrder: 1 }),
     node({
@@ -279,7 +279,7 @@ test("scrollable nodes are preserved as collapse boundaries", () => {
       width: 100,
       height: 100,
       domParentId: "parent",
-      isScrollable: true,
+      maybeScrollRegion: true,
       paintOrder: 2,
     }),
   ]);
@@ -483,7 +483,7 @@ function node(overrides: NodeOverrides): DomNodeRecord {
     position: overrides.position ?? "static",
     zIndex: overrides.zIndex,
     isInteractive: overrides.isInteractive ?? false,
-    isScrollable: overrides.isScrollable ?? false,
+    maybeScrollRegion: overrides.maybeScrollRegion ?? false,
   };
 
   return raw;

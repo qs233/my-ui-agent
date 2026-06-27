@@ -74,7 +74,7 @@ function classifyNode(record: DomNodeRecord, children: CollapsedTreeNode[]): Col
     paintOrder: record.paintOrder,
     position: record.position,
     zIndex: record.zIndex,
-    isScrollable: record.isScrollable,
+    maybeScrollRegion: record.maybeScrollRegion,
     children,
   };
 
@@ -89,7 +89,7 @@ function canCollapseSingleChildWrapper(parent: CollapsedTreeNode, child: Collaps
   if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(parent.tagName)) return false;
   if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(child.tagName)) return false;
   if (shouldPreservePositionedBoundary(parent, child)) return false;
-  if (parent.isScrollable || child.isScrollable) return false;
+  if (parent.maybeScrollRegion || child.maybeScrollRegion) return false;
   if (parent.paintOrder > child.paintOrder) return false;
   return isFullyContained(child, parent);
 }

@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { chromium } from "playwright";
-import { captureOverview, captureOverviewFromPage, serializeOverviewText } from "../src/index.js";
+import { captureOverview, captureOverviewFromPage, hasScrollableOverflow, serializeOverviewText } from "../src/index.js";
 
 const hasChromium = existsSync(chromium.executablePath());
 
@@ -22,7 +22,10 @@ test("captureOverview builds a stable tree from a local page", { skip: !hasChrom
   assert.match(text, /^\[1\] body/m);
   assert.match(text, /\[\d+\] LEAF button/);
   assert.match(text, /\[\d+\] LEAF input/);
-  assert.match(text, /scroll/);
+  assert.match(text, /class="scroll-box"[^\n]*maybe-scroll/);
+  assert.match(text, /class="hidden-scroll-box"[^\n]*maybe-scroll/);
+  assert.match(text, /class="quiet-scroll-box"[^\n]*maybe-scroll/);
+  assert.doesNotMatch(text, /scroll-overflow/);
   assert.match(text, /fixed-bar/);
   assert.match(text, /\[\d+\] LEAF h1 text="Account Settings"/);
   assert.match(text, /Generated label/);
@@ -31,6 +34,33 @@ test("captureOverview builds a stable tree from a local page", { skip: !hasChrom
   assert.doesNotMatch(text, /backendNodeId/);
   assert.doesNotMatch(text, /Invisible action|Hidden content/);
   assert.doesNotMatch(text, /font-family|window\.fixtureLoaded|\.scroll-box\{/);
+});
+
+test("hasScrollableOverflow checks a requested node on demand", { skip: !hasChromium }, async () => {
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <!doctype html>
+      <div class="overflowing" style="overflow:hidden;height:32px;width:100px">
+        <div style="height:96px">Tall content</div>
+      </div>
+      <div class="quiet" style="overflow:auto;height:120px;width:100px">
+        <div style="height:24px">Short content</div>
+      </div>
+    `);
+    const snapshot = await captureOverviewFromPage(page);
+    const overflowing = [...snapshot.domNodes.values()].find((node) => node.className === "overflowing");
+    const quiet = [...snapshot.domNodes.values()].find((node) => node.className === "quiet");
+
+    assert.equal(overflowing?.maybeScrollRegion, true);
+    assert.equal(quiet?.maybeScrollRegion, true);
+    assert.equal(await hasScrollableOverflow(page, overflowing?.id ?? ""), true);
+    assert.equal(await hasScrollableOverflow(page, quiet?.id ?? ""), false);
+  } finally {
+    await browser.close();
+  }
 });
 
 test("captureOverview reads rendered content inside a shadow root", { skip: !hasChromium }, async () => {
