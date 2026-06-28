@@ -203,6 +203,54 @@ test("visibleNodesFromSnapshot uses viewport margin for near-viewport nodes", ()
   assert.equal(filtered.find((node) => node.id === "6")?.text, "Out");
 });
 
+test("visibleNodesFromSnapshot respects clipping ancestors without viewport filtering", () => {
+  const snapshot = clippedViewportSnapshot();
+
+  const filtered = visibleNodesFromSnapshot(snapshot);
+
+  assert.deepEqual(filtered.map((node) => node.id), ["1", "2", "3", "6", "8", "10"]);
+  assert.equal(filtered.find((node) => node.id === "4"), undefined);
+  assert.equal(filtered.find((node) => node.id === "6")?.text, "Inside");
+  assert.equal(filtered.find((node) => node.id === "8")?.text, "Off viewport");
+  assert.equal(filtered.find((node) => node.id === "10")?.text, "Partial");
+});
+
+test("visibleNodesFromSnapshot combines viewport and clipping filters", () => {
+  const snapshot = clippedViewportSnapshot();
+  const viewport = bounds({ x: 0, y: 0, width: 200, height: 200 });
+
+  const filtered = visibleNodesFromSnapshot(snapshot, { viewportFilter: { viewport } });
+
+  assert.deepEqual(filtered.map((node) => node.id), ["1", "2", "3", "6", "10"]);
+  assert.equal(filtered.find((node) => node.id === "4"), undefined);
+  assert.equal(filtered.find((node) => node.id === "6")?.text, "Inside");
+  assert.equal(filtered.find((node) => node.id === "8"), undefined);
+  assert.equal(filtered.find((node) => node.id === "10")?.text, "Partial");
+});
+
+test("visibleNodesFromSnapshot applies overflow clipping per axis", () => {
+  const xFiltered = visibleNodesFromSnapshot(axisClippingSnapshot({ overflowX: "hidden" }));
+  assert.deepEqual(xFiltered.map((node) => node.id), ["1", "2", "3", "4", "8"]);
+  assert.equal(xFiltered.find((node) => node.id === "4")?.text, "Y out");
+  assert.equal(xFiltered.find((node) => node.id === "6"), undefined);
+
+  const yFiltered = visibleNodesFromSnapshot(axisClippingSnapshot({ overflowY: "hidden" }));
+  assert.deepEqual(yFiltered.map((node) => node.id), ["1", "2", "3", "6", "8"]);
+  assert.equal(yFiltered.find((node) => node.id === "4"), undefined);
+  assert.equal(yFiltered.find((node) => node.id === "6")?.text, "X out");
+
+  const bothFiltered = visibleNodesFromSnapshot(axisClippingSnapshot({ overflow: "hidden" }));
+  assert.deepEqual(bothFiltered.map((node) => node.id), ["1", "2", "3", "8"]);
+  assert.equal(bothFiltered.find((node) => node.id === "4"), undefined);
+  assert.equal(bothFiltered.find((node) => node.id === "6"), undefined);
+
+  const clipFiltered = visibleNodesFromSnapshot(axisClippingSnapshot({ overflow: "clip" }));
+  assert.deepEqual(clipFiltered.map((node) => node.id), ["1", "2", "3", "8"]);
+  assert.equal(clipFiltered.find((node) => node.id === "4"), undefined);
+  assert.equal(clipFiltered.find((node) => node.id === "6"), undefined);
+  assert.equal(clipFiltered.find((node) => node.id === "3")?.maybeScrollRegion, false);
+});
+
 test("captureVisibleNodes falls back to css visual viewport when viewportFilter is enabled", async () => {
   const sentMethods: string[] = [];
   let detachCount = 0;
@@ -399,6 +447,144 @@ function viewportSnapshot(): SnapshotResponse {
       },
     }],
   };
+}
+
+function clippedViewportSnapshot(): SnapshotResponse {
+  const strings = [
+    "",
+    "#document",
+    "HTML",
+    "BODY",
+    "DIV",
+    "#text",
+    "Clipped",
+    "Inside",
+    "block",
+    "visible",
+    "1",
+    "static",
+    "auto",
+    "hidden",
+    "Partial",
+    "Off viewport",
+  ];
+  const visibleStyles = [8, 9, 10, 9, 11, 12, 9, 9, 9, 12, 12];
+  const clippingStyles = [8, 9, 10, 9, 11, 12, 13, 13, 13, 12, 12];
+
+  return {
+    strings,
+    documents: [{
+      nodes: {
+        parentIndex: [-1, 0, 1, 2, 3, 4, 3, 6, 2, 8, 3, 10],
+        nodeType: [9, 1, 1, 1, 1, 3, 1, 3, 1, 3, 1, 3],
+        nodeName: [1, 2, 3, 4, 4, 5, 4, 5, 4, 5, 4, 5],
+        backendNodeId: [0, 1, 2, 3, 4, 0, 6, 0, 8, 0, 10, 0],
+        attributes: [[], [], [], [], [], [], [], [], [], [], [], []],
+      },
+      layout: {
+        nodeIndex: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        bounds: [
+          rect(0, 0, 500, 500),
+          rect(0, 0, 500, 500),
+          rect(0, 60, 200, 100),
+          rect(10, 10, 80, 20),
+          rect(10, 10, 50, 10),
+          rect(10, 80, 80, 20),
+          rect(10, 80, 50, 10),
+          rect(10, 1000, 80, 20),
+          rect(10, 1000, 50, 10),
+          rect(10, 150, 80, 30),
+          rect(10, 150, 50, 10),
+        ],
+        text: [0, 0, 0, 0, 6, 0, 7, 0, 15, 0, 14],
+        styles: [
+          visibleStyles,
+          visibleStyles,
+          clippingStyles,
+          visibleStyles,
+          [],
+          visibleStyles,
+          [],
+          visibleStyles,
+          [],
+          visibleStyles,
+          [],
+        ],
+        paintOrders: [1, 1, 1, 2, 3, 2, 3, 2, 3, 2, 3],
+      },
+    }],
+  };
+}
+
+function axisClippingSnapshot(overrides: { overflow?: string; overflowX?: string; overflowY?: string }): SnapshotResponse {
+  const strings = [
+    "",
+    "#document",
+    "HTML",
+    "BODY",
+    "DIV",
+    "#text",
+    "Y out",
+    "X out",
+    "Inside",
+    "block",
+    "visible",
+    "1",
+    "static",
+    "auto",
+    "hidden",
+    "clip",
+  ];
+  const visibleStyles = [9, 10, 11, 10, 12, 13, 10, 10, 10, 13, 13];
+  const clippingStyles = [
+    9,
+    10,
+    11,
+    10,
+    12,
+    13,
+    styleStringIndex(strings, overrides.overflow ?? "visible"),
+    styleStringIndex(strings, overrides.overflowX ?? "visible"),
+    styleStringIndex(strings, overrides.overflowY ?? "visible"),
+    13,
+    13,
+  ];
+
+  return {
+    strings,
+    documents: [{
+      nodes: {
+        parentIndex: [-1, 0, 1, 2, 3, 4, 3, 6, 3, 8],
+        nodeType: [9, 1, 1, 1, 1, 3, 1, 3, 1, 3],
+        nodeName: [1, 2, 3, 4, 4, 5, 4, 5, 4, 5],
+        backendNodeId: [0, 1, 2, 3, 4, 0, 6, 0, 8, 0],
+        attributes: [[], [], [], [], [], [], [], [], [], []],
+      },
+      layout: {
+        nodeIndex: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        bounds: [
+          rect(0, 0, 500, 500),
+          rect(0, 0, 500, 500),
+          rect(0, 0, 100, 100),
+          rect(10, 150, 30, 20),
+          rect(10, 150, 30, 10),
+          rect(150, 10, 30, 20),
+          rect(150, 10, 30, 10),
+          rect(10, 10, 30, 20),
+          rect(10, 10, 30, 10),
+        ],
+        text: [0, 0, 0, 0, 6, 0, 7, 0, 8],
+        styles: [visibleStyles, visibleStyles, clippingStyles, visibleStyles, [], visibleStyles, [], visibleStyles, []],
+        paintOrders: [1, 1, 1, 2, 3, 2, 3, 2, 3],
+      },
+    }],
+  };
+}
+
+function styleStringIndex(strings: string[], value: string): number {
+  const index = strings.indexOf(value);
+  if (index === -1) throw new Error(`Missing style string: ${value}`);
+  return index;
 }
 
 function scaledViewportSnapshot(): SnapshotResponse {

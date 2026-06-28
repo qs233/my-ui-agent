@@ -1,4 +1,3 @@
-import { intersectsExpandedViewport } from "./geometry.js";
 import { COMPUTED_STYLES } from "./snapshot.js";
 import { appendText, normalizeText, truncateText } from "./text.js";
 import type {
@@ -79,6 +78,8 @@ export function decodeSnapshot(snapshot: SnapshotResponse): DecodedLayoutNode[] 
 export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: SnapshotOptions = {}): DomNodeRecord[] {
   const textMaxLength = options.textMaxLength ?? 80;
   const viewportFilter = resolveViewportFilter(options);
+  const baseClip = createBaseVisibleClip(viewportFilter);
+  const visibleClipMemo = new Map<number | null, VisibleClip>();
   const decodedElements = new Map<number, DecodedLayoutElement>();
   for (const node of decodedNodes) {
     if (node.nodeType === 1) decodedElements.set(node.nodeIndex, node);
@@ -88,14 +89,20 @@ export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: Snapsho
   const renderBlockedMemo = new Map<number, boolean>();
   for (const element of decodedElements.values()) {
     if (!isRetainedElement(element, decodedElements, renderBlockedMemo)) continue;
-    if (viewportFilter && !isInsideResolvedViewport(element.bounds, viewportFilter)) continue;
+    if (!isInsideVisibleClip(
+      element.bounds,
+      resolveDecodedVisibleClip(element.parentElementNodeIndex, decodedElements, baseClip, visibleClipMemo),
+    )) continue;
     retainedElements.set(element.nodeIndex, { ...element, retained: true });
   }
 
   const textByOwner = new Map<number, string>();
   for (const node of decodedNodes) {
     if (node.nodeType !== 3 || !isUsableText(node)) continue;
-    if (viewportFilter && !isInsideResolvedViewport(node.bounds, viewportFilter)) continue;
+    if (!isInsideVisibleClip(
+      node.bounds,
+      resolveDecodedVisibleClip(node.parentElementNodeIndex, decodedElements, baseClip, visibleClipMemo),
+    )) continue;
     if (isTextRenderBlocked(node, decodedElements, renderBlockedMemo)) continue;
 
     const ownerNodeIndex = findNearestRetainedElement(
@@ -144,20 +151,28 @@ export function visibleNodesFromSnapshot(snapshot: SnapshotResponse, options: Sn
 
   const textMaxLength = options.textMaxLength ?? 80;
   const viewportFilter = resolveViewportFilter(options);
+  const baseClip = createBaseVisibleClip(viewportFilter);
   const { elements, texts } = collectSnapshotLayoutCandidates(document, snapshot.strings);
   const retainedElements = new Map<number, SnapshotLayoutElementCandidate>();
   const renderBlockedMemo = new Map<number, boolean>();
+  const visibleClipMemo = new Map<number | null, VisibleClip>();
 
   for (const element of elements.values()) {
     if (!isRetainedSnapshotElement(element, document, elements, renderBlockedMemo)) continue;
-    if (viewportFilter && !isInsideResolvedViewport(element.bounds, viewportFilter)) continue;
+    if (!isInsideVisibleClip(
+      element.bounds,
+      resolveSnapshotVisibleClip(readParentIndex(document, element.nodeIndex), document, elements, baseClip, visibleClipMemo),
+    )) continue;
     retainedElements.set(element.nodeIndex, element);
   }
 
   const textByOwner = new Map<number, string>();
   for (const text of texts) {
     if (!isUsableSnapshotText(text)) continue;
-    if (viewportFilter && !isInsideResolvedViewport(text.bounds, viewportFilter)) continue;
+    if (!isInsideVisibleClip(
+      text.bounds,
+      resolveSnapshotVisibleClip(readParentIndex(document, text.nodeIndex), document, elements, baseClip, visibleClipMemo),
+    )) continue;
     if (isSnapshotTextRenderBlocked(text, document, elements, renderBlockedMemo)) continue;
 
     const ownerNodeIndex = findNearestRetainedSnapshotElement(
@@ -222,6 +237,18 @@ interface ResolvedViewportFilter {
   margin: number;
 }
 
+interface AxisClip {
+  min: number;
+  max: number;
+}
+
+interface AxisAwareClip {
+  x?: AxisClip;
+  y?: AxisClip;
+}
+
+type VisibleClip = AxisAwareClip | undefined;
+
 function resolveViewportFilter(options: SnapshotOptions): ResolvedViewportFilter | undefined {
   const filter = options.viewportFilter;
   if (!filter || filter === true) return undefined;
@@ -232,8 +259,111 @@ function resolveViewportFilter(options: SnapshotOptions): ResolvedViewportFilter
   };
 }
 
-function isInsideResolvedViewport(bounds: Bounds, filter: ResolvedViewportFilter): boolean {
-  return intersectsExpandedViewport(bounds, filter.viewport, filter.margin);
+function createBaseVisibleClip(filter: ResolvedViewportFilter | undefined): VisibleClip {
+  if (!filter) return undefined;
+  return boundsToVisibleClip(expandBounds(filter.viewport, filter.margin));
+}
+
+function isInsideVisibleClip(bounds: Bounds, clip: VisibleClip): boolean {
+  if (!clip) return true;
+  const width = clip.x ? computeAxisIntersection(bounds.x, bounds.x + bounds.width, clip.x) : bounds.width;
+  const height = clip.y ? computeAxisIntersection(bounds.y, bounds.y + bounds.height, clip.y) : bounds.height;
+  return width * height > 1;
+}
+
+function resolveDecodedVisibleClip(
+  startNodeIndex: number | null,
+  elements: Map<number, DecodedLayoutElement>,
+  baseClip: VisibleClip,
+  memo: Map<number | null, VisibleClip>,
+): VisibleClip {
+  if (memo.has(startNodeIndex)) return memo.get(startNodeIndex);
+
+  const parent = startNodeIndex === null ? undefined : elements.get(startNodeIndex);
+  const parentClip = parent
+    ? resolveDecodedVisibleClip(parent.parentElementNodeIndex, elements, baseClip, memo)
+    : baseClip;
+  const clip = parent ? applyClippingAncestor(parentClip, parent.bounds, parent.styles) : parentClip;
+  memo.set(startNodeIndex, clip);
+  return clip;
+}
+
+function resolveSnapshotVisibleClip(
+  startNodeIndex: number | null,
+  document: SnapshotDocument,
+  elements: Map<number, SnapshotLayoutElementCandidate>,
+  baseClip: VisibleClip,
+  memo: Map<number | null, VisibleClip>,
+): VisibleClip {
+  if (memo.has(startNodeIndex)) return memo.get(startNodeIndex);
+
+  const parent = startNodeIndex === null ? undefined : elements.get(startNodeIndex);
+  const parentClip = parent
+    ? resolveSnapshotVisibleClip(readParentIndex(document, parent.nodeIndex), document, elements, baseClip, memo)
+    : baseClip;
+  const clip = parent ? applyClippingAncestor(parentClip, parent.bounds, parent.styles) : parentClip;
+  memo.set(startNodeIndex, clip);
+  return clip;
+}
+
+function applyClippingAncestor(
+  parentClip: VisibleClip,
+  bounds: Bounds,
+  styles: ReadonlyMap<string, string>,
+): VisibleClip {
+  const axes = getClippingAxes(styles);
+  if (!axes.x && !axes.y) return parentClip;
+
+  const clip: AxisAwareClip = { ...(parentClip ?? {}) };
+  if (axes.x) clip.x = intersectAxisClip(parentClip?.x, { min: bounds.x, max: bounds.x + bounds.width });
+  if (axes.y) clip.y = intersectAxisClip(parentClip?.y, { min: bounds.y, max: bounds.y + bounds.height });
+  return clip;
+}
+
+function getClippingAxes(styles: ReadonlyMap<string, string>): { x: boolean; y: boolean } {
+  const overflow = styles.get("overflow");
+  const overflowX = styles.get("overflow-x") || overflow;
+  const overflowY = styles.get("overflow-y") || overflow;
+  return {
+    x: isClippingOverflow(overflow) || isClippingOverflow(overflowX),
+    y: isClippingOverflow(overflow) || isClippingOverflow(overflowY),
+  };
+}
+
+function isClippingOverflow(value: string | undefined): boolean {
+  return value === "auto" || value === "scroll" || value === "hidden" || value === "clip";
+}
+
+function boundsToVisibleClip(bounds: Bounds): AxisAwareClip {
+  return {
+    x: { min: bounds.x, max: bounds.x + bounds.width },
+    y: { min: bounds.y, max: bounds.y + bounds.height },
+  };
+}
+
+function intersectAxisClip(current: AxisClip | undefined, next: AxisClip): AxisClip {
+  if (!current) return next;
+  return {
+    min: Math.max(current.min, next.min),
+    max: Math.min(current.max, next.max),
+  };
+}
+
+function computeAxisIntersection(start: number, end: number, clip: AxisClip): number {
+  return Math.max(0, Math.min(end, clip.max) - Math.max(start, clip.min));
+}
+
+function expandBounds(bounds: Bounds, margin: number): Bounds {
+  const safeMargin = Number.isFinite(margin) ? Math.max(0, margin) : 0;
+  const width = bounds.width + safeMargin * 2;
+  const height = bounds.height + safeMargin * 2;
+  return {
+    x: bounds.x - safeMargin,
+    y: bounds.y - safeMargin,
+    width,
+    height,
+    area: Math.max(0, width * height),
+  };
 }
 
 function collectSnapshotLayoutCandidates(
