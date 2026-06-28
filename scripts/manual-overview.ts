@@ -1,9 +1,10 @@
 import { captureOverview, serializeOverviewText } from "../src/index.js";
 
-const URL_TO_TEST = "https://google.com";
+const URL_TO_TEST = "https://layui.dev/docs/2/form/";
 
 const tree = await captureOverview(URL_TO_TEST, {
-  viewport: { width: 1280, height: 720 },
+  pageViewport: { width: 1280, height: 720 },
+  viewportFilter: true,
   timeoutMs: 30_000,
   waitUntil: "load",
 });

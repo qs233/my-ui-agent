@@ -10,7 +10,7 @@ const hasChromium = existsSync(chromium.executablePath());
 test("captureOverview builds a stable tree from a local page", { skip: !hasChromium }, async () => {
   const url = pathToFileURL(`${process.cwd()}/test/fixtures/overview.html`).href;
   const snapshot = await captureOverview(url, {
-    viewport: { width: 900, height: 700 },
+    pageViewport: { width: 900, height: 700 },
     waitUntil: "load",
     timeoutMs: 15_000,
   });

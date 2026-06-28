@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { Page } from "playwright";
 import { collapseDomTree } from "../src/compress.js";
+import { intersectsExpandedViewport } from "../src/geometry.js";
+import { captureVisibleNodes } from "../src/index.js";
 import { decodeSnapshot, prepareNodes, visibleNodesFromSnapshot } from "../src/prepare.js";
 import type {
   Bounds,
@@ -167,6 +170,74 @@ test("visibleNodesFromSnapshot prepares retained nodes directly from snapshot", 
   assert.equal(raw.find((node) => node.id === "5")?.text, "Submit Generated");
 });
 
+test("intersectsExpandedViewport accepts meaningful viewport overlap", () => {
+  const viewport = bounds({ x: 0, y: 0, width: 100, height: 100 });
+
+  assert.equal(intersectsExpandedViewport(bounds({ x: 10, y: 10, width: 10, height: 10 }), viewport), true);
+  assert.equal(intersectsExpandedViewport(bounds({ x: 200, y: 10, width: 10, height: 10 }), viewport), false);
+  assert.equal(intersectsExpandedViewport(bounds({ x: 100, y: 10, width: 10, height: 10 }), viewport), false);
+  assert.equal(intersectsExpandedViewport(bounds({ x: 100, y: 10, width: 10, height: 10 }), viewport, 1), true);
+  assert.equal(intersectsExpandedViewport(bounds({ x: 0, y: 0, width: 100, height: 2000 }), viewport), true);
+});
+
+test("visibleNodesFromSnapshot filters retained elements and text by explicit viewport", () => {
+  const snapshot = viewportSnapshot();
+  const viewport = bounds({ x: 0, y: 0, width: 100, height: 100 });
+
+  const unfiltered = visibleNodesFromSnapshot(snapshot);
+  assert.deepEqual(unfiltered.map((node) => node.id), ["1", "2", "3", "4", "6"]);
+  assert.equal(unfiltered.find((node) => node.id === "6")?.text, "Out");
+
+  const filtered = visibleNodesFromSnapshot(snapshot, { viewportFilter: { viewport } });
+  assert.deepEqual(filtered.map((node) => node.id), ["1", "2", "3", "4"]);
+  assert.equal(filtered.find((node) => node.id === "4")?.text, "In");
+  assert.equal(filtered.find((node) => node.id === "3")?.text, "");
+});
+
+test("visibleNodesFromSnapshot uses viewport margin for near-viewport nodes", () => {
+  const snapshot = viewportSnapshot();
+  const viewport = bounds({ x: 0, y: 0, width: 100, height: 100 });
+
+  const filtered = visibleNodesFromSnapshot(snapshot, { viewportFilter: { viewport, margin: 1000 } });
+  assert.deepEqual(filtered.map((node) => node.id), ["1", "2", "3", "4", "6"]);
+  assert.equal(filtered.find((node) => node.id === "6")?.text, "Out");
+});
+
+test("captureVisibleNodes resolves css visual viewport when viewportFilter is enabled", async () => {
+  const sentMethods: string[] = [];
+  let detachCount = 0;
+  const page = {
+    context: () => ({
+      newCDPSession: async () => ({
+        send: async (method: string) => {
+          sentMethods.push(method);
+          if (method === "Page.getLayoutMetrics") {
+            return {
+              cssVisualViewport: {
+                pageX: 0,
+                pageY: 0,
+                clientWidth: 100,
+                clientHeight: 100,
+              },
+            };
+          }
+          if (method === "DOMSnapshot.captureSnapshot") return viewportSnapshot();
+          throw new Error(`Unexpected CDP method: ${method}`);
+        },
+        detach: async () => {
+          detachCount += 1;
+        },
+      }),
+    }),
+  } as unknown as Page;
+
+  const raw = await captureVisibleNodes(page, { viewportFilter: true });
+
+  assert.deepEqual(sentMethods, ["Page.getLayoutMetrics", "DOMSnapshot.captureSnapshot"]);
+  assert.equal(detachCount, 1);
+  assert.deepEqual(raw.map((node) => node.id), ["1", "2", "3", "4"]);
+});
+
 test("a retained element with no retained children becomes LEAF during collapse", () => {
   const raw = prepareNodes([
     element(1, null),
@@ -246,4 +317,51 @@ function styleMap(overrides: Record<string, string> = {}): ReadonlyMap<string, s
     cursor: "auto",
     ...overrides,
   }));
+}
+
+function viewportSnapshot(): SnapshotResponse {
+  const strings = [
+    "",
+    "#document",
+    "HTML",
+    "BODY",
+    "DIV",
+    "#text",
+    "In",
+    "Out",
+    "block",
+    "visible",
+    "1",
+    "static",
+    "auto",
+  ];
+  const styles = [8, 9, 10, 9, 11, 12, 9, 9, 9, 12, 12];
+
+  return {
+    strings,
+    documents: [{
+      nodes: {
+        parentIndex: [-1, 0, 1, 2, 3, 4, 3, 6],
+        nodeType: [9, 1, 1, 1, 1, 3, 1, 3],
+        nodeName: [1, 2, 3, 4, 4, 5, 4, 5],
+        backendNodeId: [0, 1, 2, 3, 4, 0, 6, 0],
+        attributes: [[], [], [], [], [], [], [], []],
+      },
+      layout: {
+        nodeIndex: [1, 2, 3, 4, 5, 6, 7],
+        bounds: [
+          rect(0, 0, 500, 2000),
+          rect(0, 0, 500, 2000),
+          rect(0, 0, 500, 2000),
+          rect(10, 10, 50, 20),
+          rect(10, 10, 20, 10),
+          rect(10, 1000, 50, 20),
+          rect(10, 1000, 20, 10),
+        ],
+        text: [0, 0, 0, 0, 6, 0, 7],
+        styles: [styles, styles, styles, styles, [], styles, []],
+        paintOrders: [1, 1, 1, 2, 3, 2, 3],
+      },
+    }],
+  };
 }

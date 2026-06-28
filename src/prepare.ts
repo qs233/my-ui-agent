@@ -1,3 +1,4 @@
+import { intersectsExpandedViewport } from "./geometry.js";
 import { COMPUTED_STYLES } from "./snapshot.js";
 import { appendText, normalizeText, truncateText } from "./text.js";
 import type {
@@ -77,6 +78,7 @@ export function decodeSnapshot(snapshot: SnapshotResponse): DecodedLayoutNode[] 
 
 export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: SnapshotOptions = {}): DomNodeRecord[] {
   const textMaxLength = options.textMaxLength ?? 80;
+  const viewportFilter = resolveViewportFilter(options);
   const decodedElements = new Map<number, DecodedLayoutElement>();
   for (const node of decodedNodes) {
     if (node.nodeType === 1) decodedElements.set(node.nodeIndex, node);
@@ -86,12 +88,14 @@ export function prepareNodes(decodedNodes: DecodedLayoutNode[], options: Snapsho
   const renderBlockedMemo = new Map<number, boolean>();
   for (const element of decodedElements.values()) {
     if (!isRetainedElement(element, decodedElements, renderBlockedMemo)) continue;
+    if (viewportFilter && !isInsideResolvedViewport(element.bounds, viewportFilter)) continue;
     retainedElements.set(element.nodeIndex, { ...element, retained: true });
   }
 
   const textByOwner = new Map<number, string>();
   for (const node of decodedNodes) {
     if (node.nodeType !== 3 || !isUsableText(node)) continue;
+    if (viewportFilter && !isInsideResolvedViewport(node.bounds, viewportFilter)) continue;
     if (isTextRenderBlocked(node, decodedElements, renderBlockedMemo)) continue;
 
     const ownerNodeIndex = findNearestRetainedElement(
@@ -139,18 +143,21 @@ export function visibleNodesFromSnapshot(snapshot: SnapshotResponse, options: Sn
   if (!document) return [];
 
   const textMaxLength = options.textMaxLength ?? 80;
+  const viewportFilter = resolveViewportFilter(options);
   const { elements, texts } = collectSnapshotLayoutCandidates(document, snapshot.strings);
   const retainedElements = new Map<number, SnapshotLayoutElementCandidate>();
   const renderBlockedMemo = new Map<number, boolean>();
 
   for (const element of elements.values()) {
     if (!isRetainedSnapshotElement(element, document, elements, renderBlockedMemo)) continue;
+    if (viewportFilter && !isInsideResolvedViewport(element.bounds, viewportFilter)) continue;
     retainedElements.set(element.nodeIndex, element);
   }
 
   const textByOwner = new Map<number, string>();
   for (const text of texts) {
     if (!isUsableSnapshotText(text)) continue;
+    if (viewportFilter && !isInsideResolvedViewport(text.bounds, viewportFilter)) continue;
     if (isSnapshotTextRenderBlocked(text, document, elements, renderBlockedMemo)) continue;
 
     const ownerNodeIndex = findNearestRetainedSnapshotElement(
@@ -208,6 +215,25 @@ interface SnapshotLayoutTextCandidate {
   bounds: Bounds;
   paintOrder: number;
   text: string;
+}
+
+interface ResolvedViewportFilter {
+  viewport: Bounds;
+  margin: number;
+}
+
+function resolveViewportFilter(options: SnapshotOptions): ResolvedViewportFilter | undefined {
+  const filter = options.viewportFilter;
+  if (!filter || filter === true) return undefined;
+  if (!filter.viewport) return undefined;
+  return {
+    viewport: filter.viewport,
+    margin: filter.margin ?? 0,
+  };
+}
+
+function isInsideResolvedViewport(bounds: Bounds, filter: ResolvedViewportFilter): boolean {
+  return intersectsExpandedViewport(bounds, filter.viewport, filter.margin);
 }
 
 function collectSnapshotLayoutCandidates(

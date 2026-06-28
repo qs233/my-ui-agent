@@ -142,12 +142,18 @@ export interface BuildVisualContainmentTreeOptions {
 
 export interface SnapshotOptions {
   textMaxLength?: number;
+  viewportFilter?: boolean | ViewportFilterOptions;
+}
+
+export interface ViewportFilterOptions {
+  margin?: number;
+  viewport?: Bounds;
 }
 
 export interface CaptureOverviewOptions extends SnapshotOptions {
   timeoutMs?: number;
   waitUntil?: "domcontentloaded" | "load" | "networkidle";
-  viewport?: {
+  pageViewport?: {
     width: number;
     height: number;
   };
