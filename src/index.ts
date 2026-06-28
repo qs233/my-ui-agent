@@ -61,7 +61,6 @@ export async function captureOverview(url: string, options: CaptureOverviewOptio
   const page = await browser.newPage({
     viewport: options.pageViewport ?? { width: 1280, height: 720 },
   });
-
   try {
     await page.goto(url, {
       waitUntil: options.waitUntil ?? "load",

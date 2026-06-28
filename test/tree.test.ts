@@ -288,6 +288,78 @@ test("maybe scroll region nodes are preserved as collapse boundaries", () => {
   assert.equal(collapsed.find((item) => item.id === "scroll-child")?.ctParentId, "parent");
 });
 
+test("maybe scroll region prevents descendants from reparenting outside its clip boundary", () => {
+  const tree = buildOverviewTree([
+    node({ id: "body", tagName: "body", width: 1000, height: 1000, paintOrder: 1 }),
+    node({ id: "outside-card", tagName: "section", x: 0, y: 500, width: 200, height: 200, domParentId: "body", paintOrder: 2 }),
+    node({
+      id: "scroll-panel",
+      tagName: "div",
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+      domParentId: "body",
+      maybeScrollRegion: true,
+      paintOrder: 2,
+    }),
+    node({
+      id: "offscreen-item",
+      tagName: "div",
+      x: 10,
+      y: 520,
+      width: 60,
+      height: 60,
+      domParentId: "scroll-panel",
+      paintOrder: 3,
+    }),
+  ]);
+
+  const scrollPanel = findVctNode(tree, "scroll-panel");
+  const outsideCard = findVctNode(tree, "outside-card");
+  const offscreenItem = findVctNode(tree, "offscreen-item");
+
+  assert.equal(offscreenItem?.vctParentId, scrollPanel?.vctId);
+  assert.equal(offscreenItem?.isReparented, false);
+  assert.equal(offscreenItem?.floating, true);
+  assert.equal(outsideCard?.children.some((child) => child.id === "offscreen-item"), false);
+});
+
+test("maybe scroll region still allows reparenting within its clip boundary", () => {
+  const tree = buildOverviewTree([
+    node({ id: "body", tagName: "body", width: 1000, height: 1000, paintOrder: 1 }),
+    node({
+      id: "scroll-panel",
+      tagName: "div",
+      width: 300,
+      height: 300,
+      domParentId: "body",
+      maybeScrollRegion: true,
+      paintOrder: 2,
+    }),
+    node({ id: "section-a", tagName: "section", width: 20, height: 20, domParentId: "scroll-panel", paintOrder: 3 }),
+    node({ id: "section-b", tagName: "section", x: 40, y: 40, width: 120, height: 120, domParentId: "scroll-panel", paintOrder: 3 }),
+    node({
+      id: "item",
+      tagName: "div",
+      x: 60,
+      y: 60,
+      width: 20,
+      height: 20,
+      domParentId: "section-a",
+      paintOrder: 4,
+    }),
+  ]);
+
+  const sectionB = findVctNode(tree, "section-b");
+  const item = findVctNode(tree, "item");
+
+  assert.equal(item?.vctParentId, sectionB?.vctId);
+  assert.equal(item?.ctParentId, "section-a");
+  assert.equal(item?.isReparented, true);
+  assert.equal(item?.floating, false);
+});
+
 test("buildVisualContainmentTree uses approximate containment for visual parents", () => {
   const tree = buildVisualContainmentTree(collapseDomTree([
     node({ id: "parent", tagName: "section", width: 200, height: 200, paintOrder: 1 }),
@@ -596,6 +668,15 @@ function node(overrides: NodeOverrides): DomNodeRecord {
 
 function buildOverviewTree(rawNodes: DomNodeRecord[]): VctNode[] {
   return buildVisualContainmentTree(collapseDomTree(rawNodes));
+}
+
+function findVctNode(nodes: VctNode[], id: string): VctNode | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const child = findVctNode(node.children, id);
+    if (child) return child;
+  }
+  return undefined;
 }
 
 function leafType(node: unknown): "LEAF" | undefined {
