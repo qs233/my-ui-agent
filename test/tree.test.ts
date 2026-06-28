@@ -360,6 +360,40 @@ test("maybe scroll region still allows reparenting within its clip boundary", ()
   assert.equal(item?.floating, false);
 });
 
+test("later inserted clip boundary adopts an existing root descendant", () => {
+  const tree = buildOverviewTree([
+    node({ id: "body", tagName: "body", width: 1000, height: 1000, paintOrder: 1 }),
+    node({
+      id: "scroll-content",
+      tagName: "ul",
+      y: -200,
+      width: 200,
+      height: 1000,
+      domParentId: "scroll-panel",
+      paintOrder: 3,
+    }),
+    node({
+      id: "scroll-panel",
+      tagName: "div",
+      width: 200,
+      height: 200,
+      domParentId: "body",
+      position: "fixed",
+      maybeScrollRegion: true,
+      paintOrder: 2,
+    }),
+  ]);
+
+  const scrollPanel = findVctNode(tree, "scroll-panel");
+  const scrollContent = findVctNode(tree, "scroll-content");
+
+  assert.equal(scrollContent?.vctParentId, scrollPanel?.vctId);
+  assert.equal(scrollContent?.ctParentId, "scroll-panel");
+  assert.equal(scrollContent?.isReparented, false);
+  assert.equal(scrollContent?.floating, true);
+  assert.equal(tree.some((root) => root.id === "scroll-content"), false);
+});
+
 test("buildVisualContainmentTree uses approximate containment for visual parents", () => {
   const tree = buildVisualContainmentTree(collapseDomTree([
     node({ id: "parent", tagName: "section", width: 200, height: 200, paintOrder: 1 }),

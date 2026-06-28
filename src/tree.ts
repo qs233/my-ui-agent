@@ -43,7 +43,7 @@ export function buildVisualContainmentTree(
       if (clipBoundary) {
         insertIntoTree(clipBoundary, node, nodeMap, true);
       } else {
-        roots.push(node);
+        insertRoot(roots, node, nodeMap);
       }
     }
 
@@ -143,6 +143,29 @@ function canUseAsVisualParent(node: VctNode, candidate: VctNode): boolean {
 
 function isFixedOrSticky(node: VctNode): boolean {
   return node.position === "fixed" || node.position === "sticky";
+}
+
+function insertRoot(roots: VctNode[], node: VctNode, nodeMap: Map<string, VctNode>): void {
+  const adopted = roots.filter((root) => canAdoptRoot(node, root, nodeMap));
+  if (adopted.length > 0) {
+    const moved = new Set(adopted);
+    roots.splice(0, roots.length, ...roots.filter((root) => !moved.has(root)));
+    for (const root of adopted) {
+      insertIntoTree(node, root, nodeMap, shouldAdoptAsClipBoundaryParent(node, root, nodeMap));
+    }
+  }
+
+  roots.push(node);
+}
+
+function canAdoptRoot(parent: VctNode, root: VctNode, nodeMap: Map<string, VctNode>): boolean {
+  if (root.paintOrder < parent.paintOrder) return false;
+  if (!respectsClipBoundary(root, parent, nodeMap)) return false;
+  return canUseAsVctParent(root, parent) || shouldAdoptAsClipBoundaryParent(parent, root, nodeMap);
+}
+
+function shouldAdoptAsClipBoundaryParent(parent: VctNode, root: VctNode, nodeMap: Map<string, VctNode>): boolean {
+  return findNearestClipBoundary(root, nodeMap)?.id === parent.id;
 }
 
 function respectsClipBoundary(
