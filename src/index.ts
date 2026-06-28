@@ -131,10 +131,22 @@ async function resolveSnapshotOptionsForPage(page: Page, options: SnapshotOption
   const filter = options.viewportFilter;
   if (!needsAutoViewport(filter)) return options;
 
-  const viewport = await captureCssVisualViewport(page);
+  const { viewport, scale } = await captureSnapshotViewport(page);
+  if (filter === true) {
+    return {
+      ...options,
+      viewportFilter: { viewport },
+    };
+  }
+  if (!filter) return options;
+
   return {
     ...options,
-    viewportFilter: filter === true ? { viewport } : { ...filter, viewport },
+    viewportFilter: {
+      ...filter,
+      viewport,
+      margin: filter.margin === undefined ? undefined : filter.margin * scale,
+    },
   };
 }
 
@@ -144,28 +156,44 @@ function needsAutoViewport(filter: SnapshotOptions["viewportFilter"]): boolean {
   return !filter.viewport;
 }
 
-async function captureCssVisualViewport(page: Page): Promise<Bounds> {
+async function captureSnapshotViewport(page: Page): Promise<{ viewport: Bounds; scale: number }> {
   const session = await page.context().newCDPSession(page);
   try {
     const metrics = await session.send("Page.getLayoutMetrics") as PageLayoutMetrics;
-    const viewport = metrics.cssVisualViewport;
+    const viewport = metrics.visualViewport ?? metrics.cssVisualViewport;
+    const cssViewport = metrics.cssVisualViewport;
+    const scale = inferViewportScale(viewport, cssViewport);
     return {
-      x: viewport.pageX,
-      y: viewport.pageY,
-      width: viewport.clientWidth,
-      height: viewport.clientHeight,
-      area: Math.max(0, viewport.clientWidth * viewport.clientHeight),
+      viewport: {
+        x: viewport.pageX,
+        y: viewport.pageY,
+        width: viewport.clientWidth,
+        height: viewport.clientHeight,
+        area: Math.max(0, viewport.clientWidth * viewport.clientHeight),
+      },
+      scale,
     };
   } finally {
     await session.detach().catch(() => undefined);
   }
 }
 
+function inferViewportScale(viewport: CdpViewport, cssViewport: CdpViewport): number {
+  const widthScale = cssViewport.clientWidth > 0 ? viewport.clientWidth / cssViewport.clientWidth : 0;
+  const heightScale = cssViewport.clientHeight > 0 ? viewport.clientHeight / cssViewport.clientHeight : 0;
+  if (Number.isFinite(widthScale) && widthScale > 0) return widthScale;
+  if (Number.isFinite(heightScale) && heightScale > 0) return heightScale;
+  return 1;
+}
+
 interface PageLayoutMetrics {
-  cssVisualViewport: {
-    pageX: number;
-    pageY: number;
-    clientWidth: number;
-    clientHeight: number;
-  };
+  visualViewport?: CdpViewport;
+  cssVisualViewport: CdpViewport;
+}
+
+interface CdpViewport {
+  pageX: number;
+  pageY: number;
+  clientWidth: number;
+  clientHeight: number;
 }

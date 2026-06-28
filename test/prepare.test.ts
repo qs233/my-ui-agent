@@ -203,7 +203,7 @@ test("visibleNodesFromSnapshot uses viewport margin for near-viewport nodes", ()
   assert.equal(filtered.find((node) => node.id === "6")?.text, "Out");
 });
 
-test("captureVisibleNodes resolves css visual viewport when viewportFilter is enabled", async () => {
+test("captureVisibleNodes falls back to css visual viewport when viewportFilter is enabled", async () => {
   const sentMethods: string[] = [];
   let detachCount = 0;
   const page = {
@@ -236,6 +236,41 @@ test("captureVisibleNodes resolves css visual viewport when viewportFilter is en
   assert.deepEqual(sentMethods, ["Page.getLayoutMetrics", "DOMSnapshot.captureSnapshot"]);
   assert.equal(detachCount, 1);
   assert.deepEqual(raw.map((node) => node.id), ["1", "2", "3", "4"]);
+});
+
+test("captureVisibleNodes prefers snapshot-coordinate visual viewport when available", async () => {
+  const page = {
+    context: () => ({
+      newCDPSession: async () => ({
+        send: async (method: string) => {
+          if (method === "Page.getLayoutMetrics") {
+            return {
+              visualViewport: {
+                pageX: 0,
+                pageY: 0,
+                clientWidth: 200,
+                clientHeight: 200,
+              },
+              cssVisualViewport: {
+                pageX: 0,
+                pageY: 0,
+                clientWidth: 100,
+                clientHeight: 100,
+              },
+            };
+          }
+          if (method === "DOMSnapshot.captureSnapshot") return scaledViewportSnapshot();
+          throw new Error(`Unexpected CDP method: ${method}`);
+        },
+        detach: async () => undefined,
+      }),
+    }),
+  } as unknown as Page;
+
+  const raw = await captureVisibleNodes(page, { viewportFilter: true });
+
+  assert.deepEqual(raw.map((node) => node.id), ["1", "2", "3", "4", "8"]);
+  assert.equal(raw.find((node) => node.id === "8")?.text, "Mid");
 });
 
 test("a retained element with no retained children becomes LEAF during collapse", () => {
@@ -364,4 +399,24 @@ function viewportSnapshot(): SnapshotResponse {
       },
     }],
   };
+}
+
+function scaledViewportSnapshot(): SnapshotResponse {
+  const snapshot = viewportSnapshot();
+  const document = snapshot.documents[0];
+  if (!document) return snapshot;
+
+  snapshot.strings.push("Mid");
+  const midTextIndex = snapshot.strings.length - 1;
+  document.nodes.parentIndex!.push(3, 8);
+  document.nodes.nodeType!.push(1, 3);
+  document.nodes.nodeName!.push(4, 5);
+  document.nodes.backendNodeId!.push(8, 0);
+  document.nodes.attributes!.push([], []);
+  document.layout.nodeIndex!.push(8, 9);
+  document.layout.bounds!.push(rect(10, 150, 50, 20), rect(10, 150, 20, 10));
+  document.layout.text?.push(0, midTextIndex);
+  document.layout.styles?.push([8, 9, 10, 9, 11, 12, 9, 9, 9, 12, 12], []);
+  document.layout.paintOrders?.push(2, 3);
+  return snapshot;
 }
