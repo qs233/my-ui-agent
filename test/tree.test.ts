@@ -360,7 +360,7 @@ test("maybe scroll region still allows reparenting within its clip boundary", ()
   assert.equal(item?.floating, false);
 });
 
-test("later inserted clip boundary adopts an existing root descendant", () => {
+test("clip boundary keeps oversized scroll content as its child", () => {
   const tree = buildOverviewTree([
     node({ id: "body", tagName: "body", width: 1000, height: 1000, paintOrder: 1 }),
     node({
@@ -409,7 +409,7 @@ test("buildVisualContainmentTree uses approximate containment for visual parents
   assert.equal(tree[0].children[0]?.isReparented, true);
 });
 
-test("serializeOverviewText writes reparent source as parent_id", () => {
+test("serializeOverviewText writes reparent source as dom_parent_id", () => {
   const tree = buildVisualContainmentTree(collapseDomTree([
     node({ id: "body", tagName: "body", width: 300, height: 300, paintOrder: 1 }),
     node({ id: "container", tagName: "div", width: 200, height: 200, domParentId: "body", paintOrder: 2 }),
@@ -429,8 +429,8 @@ test("serializeOverviewText writes reparent source as parent_id", () => {
   ]));
 
   const text = serializeOverviewText(tree);
-  assert.match(text, /\breparented\b.*\bparent_id=2\b/);
-  assert.doesNotMatch(text, /dom_parent_id/);
+  assert.match(text, /\breparented\b.*\bdom_parent_id=2\b/);
+  assert.doesNotMatch(text, /\bparent_id=/);
 });
 
 test("serializeOverviewText marks expandable collapsed nodes", () => {

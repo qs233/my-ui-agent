@@ -44,7 +44,7 @@ function formatNode(
   if (node.isReparented) {
     parts.push("reparented");
     const parentVctId = node.ctParentId ? vctIdByDomId.get(node.ctParentId) : undefined;
-    if (parentVctId !== undefined) parts.push(`parent_id=${parentVctId}`);
+    if (parentVctId !== undefined) parts.push(`dom_parent_id=${parentVctId}`);
   }
   if (node.alignToId !== undefined) parts.push(`align_to_id=${node.alignToId}`);
 

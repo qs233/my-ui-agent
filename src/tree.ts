@@ -15,6 +15,11 @@ interface SpatialItem {
   node: VctNode;
 }
 
+interface ParentChoice {
+  parent: VctNode | null;
+  allowUncontainedParent: boolean;
+}
+
 export function buildVisualContainmentTree(
   collapsedNodes: CollapsedNode[],
   options: BuildVisualContainmentTreeOptions = {},
@@ -22,34 +27,9 @@ export function buildVisualContainmentTree(
   const nodeMap = new Map<string, VctNode>();
   for (const node of collapsedNodes) nodeMap.set(node.id, toVctNode(node));
 
-  const finalNodes = [...nodeMap.values()].sort((a, b) => {
-    const areaDelta = b.area - a.area;
-    if (areaDelta !== 0) return areaDelta;
-    return a.paintOrder - b.paintOrder;
-  });
-
-  const roots: VctNode[] = [];
-  const rtree = new RBush<SpatialItem>();
-  const inserted = new Map<string, VctNode>();
-
-  for (const node of finalNodes) {
-    if (tryInsertByDomFastPath(node, nodeMap, inserted, rtree)) continue;
-
-    const bestParent = findBestSpatialParent(node, rtree, nodeMap);
-    if (bestParent) {
-      insertIntoTreeWithApprox(bestParent, node, nodeMap);
-    } else {
-      const clipBoundary = findInsertedClipBoundary(node, nodeMap, inserted);
-      if (clipBoundary) {
-        insertIntoTree(clipBoundary, node, nodeMap, true);
-      } else {
-        insertRoot(roots, node, nodeMap);
-      }
-    }
-
-    insertSpatialNode(rtree, node);
-    inserted.set(node.id, node);
-  }
+  const rtree = buildSpatialIndex([...nodeMap.values()]);
+  const parentChoices = resolveParentChoices([...nodeMap.values()], nodeMap, rtree);
+  const roots = assembleVctForest([...nodeMap.values()], parentChoices);
 
   finalizeVctMetadata(roots, options.alignmentResolver);
   return roots;
@@ -70,42 +50,89 @@ function toVctNode(node: CollapsedNode): VctNode {
   };
 }
 
-function tryInsertByDomFastPath(
+function buildSpatialIndex(nodes: VctNode[]): RBush<SpatialItem> {
+  const rtree = new RBush<SpatialItem>();
+  for (const node of nodes) rtree.insert(toSpatialItem(node));
+  return rtree;
+}
+
+function toSpatialItem(node: VctNode): SpatialItem {
+  return {
+    minX: node.x,
+    minY: node.y,
+    maxX: node.x + node.width,
+    maxY: node.y + node.height,
+    node,
+  };
+}
+
+function resolveParentChoices(
+  nodes: VctNode[],
+  nodeMap: Map<string, VctNode>,
+  rtree: RBush<SpatialItem>,
+): Map<string, ParentChoice> {
+  const choices = new Map<string, ParentChoice>();
+  for (const node of nodes) choices.set(node.id, resolveParentChoice(node, nodeMap, rtree));
+  breakParentCycles(nodes, choices);
+  return choices;
+}
+
+function resolveParentChoice(
   node: VctNode,
   nodeMap: Map<string, VctNode>,
-  inserted: Map<string, VctNode>,
   rtree: RBush<SpatialItem>,
-): boolean {
-  let currentParentId = node.ctParentId;
-
-  while (currentParentId) {
-    const activeParent = nodeMap.get(currentParentId);
-    if (!activeParent) break;
-
-    const potentialParent = inserted.get(activeParent.id);
-    if (!potentialParent) {
-      currentParentId = activeParent.ctParentId;
-      continue;
-    }
-
-    if (
-      isFixedOrSticky(node) &&
-      potentialParent.position !== "fixed" &&
-      potentialParent.position !== "sticky"
-    ) {
-      break;
-    }
-
-    if (canUseAsVctParent(node, potentialParent) && respectsClipBoundary(node, potentialParent, nodeMap)) {
-      insertIntoTreeWithApprox(potentialParent, node, nodeMap);
-      insertSpatialNode(rtree, node);
-      inserted.set(node.id, node);
-      return true;
-    }
-
-    break;
+): ParentChoice {
+  const domParent = node.ctParentId ? nodeMap.get(node.ctParentId) : undefined;
+  if (domParent && canUseAsResolvedParent(node, domParent, nodeMap)) {
+    return { parent: domParent, allowUncontainedParent: false };
   }
 
+  const spatialParent = findBestSpatialParent(node, rtree, nodeMap);
+  if (spatialParent) return { parent: spatialParent, allowUncontainedParent: false };
+
+  if (!isFixedOrSticky(node)) {
+    const boundary = findNearestClipBoundary(node, nodeMap);
+    if (boundary) return { parent: boundary, allowUncontainedParent: true };
+  }
+
+  return { parent: null, allowUncontainedParent: false };
+}
+
+function canUseAsResolvedParent(
+  node: VctNode,
+  candidateParent: VctNode,
+  nodeMap: Map<string, VctNode>,
+): boolean {
+  return (
+    canUseAsVisualParent(node, candidateParent) &&
+    respectsClipBoundary(node, candidateParent, nodeMap) &&
+    canUseAsVctParent(node, candidateParent)
+  );
+}
+
+function breakParentCycles(nodes: VctNode[], choices: Map<string, ParentChoice>): void {
+  for (const node of nodes) {
+    const choice = choices.get(node.id);
+    if (!choice?.parent) continue;
+    if (createsParentCycle(node, choice.parent, choices)) {
+      choices.set(node.id, { parent: null, allowUncontainedParent: false });
+    }
+  }
+}
+
+function createsParentCycle(
+  node: VctNode,
+  parent: VctNode,
+  choices: ReadonlyMap<string, ParentChoice>,
+): boolean {
+  const seen = new Set<string>();
+  let current: VctNode | null = parent;
+  while (current) {
+    if (current.id === node.id) return true;
+    if (seen.has(current.id)) return false;
+    seen.add(current.id);
+    current = choices.get(current.id)?.parent ?? null;
+  }
   return false;
 }
 
@@ -123,9 +150,9 @@ function findBestSpatialParent(
 
   const validContainers = candidates
     .map((item) => item.node)
-    .filter((candidate) => canUseAsVisualParent(node, candidate))
-    .filter((candidate) => respectsClipBoundary(node, candidate, nodeMap))
-    .filter((candidate) => canUseAsVctParent(node, candidate));
+    .filter((candidate) => candidate !== node)
+    .filter((candidate) => !isSameOrDescendantOf(candidate, node.id, nodeMap))
+    .filter((candidate) => canUseAsResolvedParent(node, candidate, nodeMap));
 
   if (validContainers.length === 0) return null;
   validContainers.sort((a, b) => a.area - b.area);
@@ -145,29 +172,6 @@ function isFixedOrSticky(node: VctNode): boolean {
   return node.position === "fixed" || node.position === "sticky";
 }
 
-function insertRoot(roots: VctNode[], node: VctNode, nodeMap: Map<string, VctNode>): void {
-  const adopted = roots.filter((root) => canAdoptRoot(node, root, nodeMap));
-  if (adopted.length > 0) {
-    const moved = new Set(adopted);
-    roots.splice(0, roots.length, ...roots.filter((root) => !moved.has(root)));
-    for (const root of adopted) {
-      insertIntoTree(node, root, nodeMap, shouldAdoptAsClipBoundaryParent(node, root, nodeMap));
-    }
-  }
-
-  roots.push(node);
-}
-
-function canAdoptRoot(parent: VctNode, root: VctNode, nodeMap: Map<string, VctNode>): boolean {
-  if (root.paintOrder < parent.paintOrder) return false;
-  if (!respectsClipBoundary(root, parent, nodeMap)) return false;
-  return canUseAsVctParent(root, parent) || shouldAdoptAsClipBoundaryParent(parent, root, nodeMap);
-}
-
-function shouldAdoptAsClipBoundaryParent(parent: VctNode, root: VctNode, nodeMap: Map<string, VctNode>): boolean {
-  return findNearestClipBoundary(root, nodeMap)?.id === parent.id;
-}
-
 function respectsClipBoundary(
   node: VctNode,
   candidateParent: VctNode,
@@ -177,16 +181,6 @@ function respectsClipBoundary(
   const boundary = findNearestClipBoundary(node, nodeMap);
   if (!boundary) return true;
   return isSameOrDescendantOf(candidateParent, boundary.id, nodeMap);
-}
-
-function findInsertedClipBoundary(
-  node: VctNode,
-  nodeMap: Map<string, VctNode>,
-  inserted: ReadonlyMap<string, VctNode>,
-): VctNode | null {
-  if (isFixedOrSticky(node)) return null;
-  const boundary = findNearestClipBoundary(node, nodeMap);
-  return boundary ? inserted.get(boundary.id) ?? null : null;
 }
 
 function findNearestClipBoundary(node: VctNode, nodeMap: Map<string, VctNode>): VctNode | null {
@@ -222,59 +216,26 @@ function isSameOrDescendantOf(
   return false;
 }
 
-export function insertIntoTreeWithApprox(
-  parent: VctNode,
-  node: VctNode,
-  nodeMap: Map<string, VctNode>,
-): void {
-  insertIntoTree(parent, node, nodeMap, false);
-}
-
-function insertIntoTree(
-  parent: VctNode,
-  node: VctNode,
-  nodeMap: Map<string, VctNode>,
-  allowUncontainedParent: boolean,
-): void {
-  const nextParent = parent.children
-    .filter((child) => child.paintOrder <= node.paintOrder)
-    .filter((child) => respectsClipBoundary(node, child, nodeMap))
-    .filter((child) => canUseAsVctParent(node, child))
-    .sort((a, b) => a.area - b.area)[0];
-
-  if (nextParent) {
-    insertIntoTreeWithApprox(nextParent, node, nodeMap);
-    return;
+function assembleVctForest(nodes: VctNode[], choices: ReadonlyMap<string, ParentChoice>): VctNode[] {
+  const roots: VctNode[] = [];
+  for (const node of nodes) {
+    node.children = [];
+    node.floating = false;
   }
 
-  const subChildren = parent.children.filter(
-    (child) =>
-      child.paintOrder >= node.paintOrder &&
-      respectsClipBoundary(child, node, nodeMap) &&
-      canUseAsVctParent(child, node),
-  );
-
-  if (subChildren.length > 0) {
-    for (const child of subChildren) {
-      child.floating = !computeOverlapRatios(child, node).isFullyContained;
+  for (const node of nodes) {
+    const choice = choices.get(node.id);
+    const parent = choice?.parent ?? null;
+    if (!parent) {
+      roots.push(node);
+      continue;
     }
-    node.children.push(...subChildren);
-    const moved = new Set(subChildren);
-    parent.children = parent.children.filter((child) => !moved.has(child));
+
+    parent.children.push(node);
+    node.floating = Boolean(choice?.allowUncontainedParent) || !computeOverlapRatios(node, parent).isFullyContained;
   }
 
-  parent.children.push(node);
-  node.floating = allowUncontainedParent || !computeOverlapRatios(node, parent).isFullyContained;
-}
-
-function insertSpatialNode(rtree: RBush<SpatialItem>, node: VctNode): void {
-  rtree.insert({
-    minX: node.x,
-    minY: node.y,
-    maxX: node.x + node.width,
-    maxY: node.y + node.height,
-    node,
-  });
+  return roots;
 }
 
 function finalizeVctMetadata(
