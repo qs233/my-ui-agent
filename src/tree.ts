@@ -20,6 +20,8 @@ interface ParentChoice {
   allowUncontainedParent: boolean;
 }
 
+const MAX_DOM_ANCESTOR_SEARCH_DEPTH = 5;
+
 export function buildVisualContainmentTree(
   collapsedNodes: CollapsedNode[],
   options: BuildVisualContainmentTreeOptions = {},
@@ -83,9 +85,12 @@ function resolveParentChoice(
   rtree: RBush<SpatialItem>,
 ): ParentChoice {
   const domParent = node.ctParentId ? nodeMap.get(node.ctParentId) : undefined;
-  if (domParent && canUseAsResolvedParent(node, domParent, nodeMap)) {
+  if (domParent && isValidResolvedParent(node, domParent, nodeMap)) {
     return { parent: domParent, allowUncontainedParent: false };
   }
+
+  const domAncestor = findNearestValidDomAncestor(node, nodeMap);
+  if (domAncestor) return { parent: domAncestor, allowUncontainedParent: false };
 
   const spatialParent = findBestSpatialParent(node, rtree, nodeMap);
   if (spatialParent) return { parent: spatialParent, allowUncontainedParent: false };
@@ -98,16 +103,36 @@ function resolveParentChoice(
   return { parent: null, allowUncontainedParent: false };
 }
 
-function canUseAsResolvedParent(
+function isValidResolvedParent(
   node: VctNode,
   candidateParent: VctNode,
   nodeMap: Map<string, VctNode>,
 ): boolean {
   return (
-    canUseAsVisualParent(node, candidateParent) &&
-    respectsClipBoundary(node, candidateParent, nodeMap) &&
-    canUseAsVctParent(node, candidateParent)
+    respectsPositioningRule(node, candidateParent) &&
+    respectsSpatialContainmentRule(node, candidateParent) &&
+    respectsClipBoundary(node, candidateParent, nodeMap)
   );
+}
+
+function findNearestValidDomAncestor(
+  node: VctNode,
+  nodeMap: Map<string, VctNode>,
+): VctNode | null {
+  let currentParentId = node.ctParentId ? nodeMap.get(node.ctParentId)?.ctParentId : null;
+  const seen = new Set<string>();
+  let checked = 0;
+
+  while (currentParentId && checked < MAX_DOM_ANCESTOR_SEARCH_DEPTH && !seen.has(currentParentId)) {
+    seen.add(currentParentId);
+    checked += 1;
+    const ancestor = nodeMap.get(currentParentId);
+    if (!ancestor) return null;
+    if (isValidResolvedParent(node, ancestor, nodeMap)) return ancestor;
+    currentParentId = ancestor.ctParentId;
+  }
+
+  return null;
 }
 
 function breakParentCycles(nodes: VctNode[], choices: Map<string, ParentChoice>): void {
@@ -152,20 +177,20 @@ function findBestSpatialParent(
     .map((item) => item.node)
     .filter((candidate) => candidate !== node)
     .filter((candidate) => !isSameOrDescendantOf(candidate, node.id, nodeMap))
-    .filter((candidate) => canUseAsResolvedParent(node, candidate, nodeMap));
+    .filter((candidate) => isValidResolvedParent(node, candidate, nodeMap));
 
   if (validContainers.length === 0) return null;
   validContainers.sort((a, b) => a.area - b.area);
   return validContainers[0];
 }
 
-function canUseAsVctParent(node: VctNode, candidate: VctNode): boolean {
+function respectsSpatialContainmentRule(node: VctNode, candidate: VctNode): boolean {
   return isApproximatelyContained(node, candidate, 0.8) && candidate.paintOrder <= node.paintOrder;
 }
 
-function canUseAsVisualParent(node: VctNode, candidate: VctNode): boolean {
+function respectsPositioningRule(node: VctNode, candidate: VctNode): boolean {
   if (!isFixedOrSticky(node)) return true;
-  return candidate.position === "fixed" || candidate.position === "sticky";
+  return isFixedOrSticky(candidate);
 }
 
 function isFixedOrSticky(node: VctNode): boolean {

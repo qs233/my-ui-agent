@@ -5,7 +5,7 @@ import { computeOverlapRatios, isApproximatelyContained } from "../src/geometry.
 import { serializeOverviewText } from "../src/serialize.js";
 import { buildVisualContainmentTree } from "../src/tree.js";
 import { truncateText } from "../src/text.js";
-import type { DomNodeRecord, VctNode } from "../src/types.js";
+import type { CollapsedNode, DomNodeRecord, VctNode } from "../src/types.js";
 
 test("overlap ratios distinguish full containment and approximate floating containment", () => {
   const full = computeOverlapRatios(
@@ -335,7 +335,7 @@ test("maybe scroll region still allows reparenting within its clip boundary", ()
       height: 300,
       domParentId: "body",
       maybeScrollRegion: true,
-      paintOrder: 2,
+      paintOrder: 5,
     }),
     node({ id: "section-a", tagName: "section", width: 20, height: 20, domParentId: "scroll-panel", paintOrder: 3 }),
     node({ id: "section-b", tagName: "section", x: 40, y: 40, width: 120, height: 120, domParentId: "scroll-panel", paintOrder: 3 }),
@@ -407,6 +407,48 @@ test("buildVisualContainmentTree uses approximate containment for visual parents
   assert.equal(tree[0].children[0]?.vctParentId, 1);
   assert.equal(tree[0].children[0]?.floating, true);
   assert.equal(tree[0].children[0]?.isReparented, true);
+});
+
+test("buildVisualContainmentTree tries nearby DOM ancestors before spatial parents", () => {
+  const tree = buildVisualContainmentTree([
+    collapsedNode({ id: "ancestor", tagName: "section", width: 300, height: 300, paintOrder: 1 }),
+    collapsedNode({
+      id: "bad-parent",
+      tagName: "div",
+      width: 20,
+      height: 20,
+      ctParentId: "ancestor",
+      paintOrder: 2,
+    }),
+    collapsedNode({
+      id: "spatial-card",
+      tagName: "aside",
+      x: 10,
+      y: 10,
+      width: 50,
+      height: 50,
+      ctParentId: "ancestor",
+      paintOrder: 2,
+    }),
+    collapsedNode({
+      id: "child",
+      tagName: "span",
+      x: 10,
+      y: 10,
+      width: 40,
+      height: 40,
+      ctParentId: "bad-parent",
+      paintOrder: 3,
+    }),
+  ]);
+
+  const ancestor = findVctNode(tree, "ancestor");
+  const child = findVctNode(tree, "child");
+  const spatialCard = findVctNode(tree, "spatial-card");
+
+  assert.equal(child?.vctParentId, ancestor?.vctId);
+  assert.equal(child?.isReparented, true);
+  assert.equal(spatialCard?.children.some((item) => item.id === "child"), false);
 });
 
 test("serializeOverviewText writes reparent source as dom_parent_id", () => {
@@ -698,6 +740,40 @@ function node(overrides: NodeOverrides): DomNodeRecord {
   };
 
   return raw;
+}
+
+function collapsedNode(overrides: Partial<CollapsedNode> & { id: string }): CollapsedNode {
+  const width = overrides.width ?? 100;
+  const height = overrides.height ?? 100;
+  const bounds = {
+    x: overrides.x ?? 0,
+    y: overrides.y ?? 0,
+    width,
+    height,
+    area: overrides.area ?? width * height,
+  };
+
+  return {
+    id: overrides.id,
+    representativeDomNodeId: overrides.representativeDomNodeId ?? overrides.id,
+    collapsedDomNodeIds: [...(overrides.collapsedDomNodeIds ?? [])],
+    visualBounds: { ...(overrides.visualBounds ?? bounds) },
+    ownBounds: { ...(overrides.ownBounds ?? bounds) },
+    ctParentId: overrides.ctParentId ?? null,
+    tagName: overrides.tagName ?? "div",
+    className: overrides.className ?? "",
+    name: overrides.name ?? "",
+    text: overrides.text ?? "",
+    x: bounds.x,
+    y: bounds.y,
+    width,
+    height,
+    area: bounds.area,
+    paintOrder: overrides.paintOrder ?? 1,
+    position: overrides.position ?? "static",
+    zIndex: overrides.zIndex,
+    maybeScrollRegion: overrides.maybeScrollRegion ?? false,
+  };
 }
 
 function buildOverviewTree(rawNodes: DomNodeRecord[]): VctNode[] {
