@@ -3,7 +3,7 @@ import { computeOverlapRatios, isApproximatelyContained } from "./geometry.js";
 import type {
   AlignmentResolver,
   BuildVisualContainmentTreeOptions,
-  CollapsedNode,
+  CollapsedTreeNode,
   VctNode,
 } from "./types.js";
 
@@ -20,24 +20,80 @@ interface ParentChoice {
   allowUncontainedParent: boolean;
 }
 
+interface DomInterval {
+  in: number;
+  out: number;
+}
+
+interface BuildContext {
+  nodes: VctNode[];
+  nodeMap: Map<string, VctNode>;
+  parentById: Map<string, VctNode | null>;
+  nearestClipBoundaryById: Map<string, VctNode | null>;
+  intervalsById: Map<string, DomInterval>;
+  getSpatialIndex: () => RBush<SpatialItem>;
+}
+
 const MAX_DOM_ANCESTOR_SEARCH_DEPTH = 5;
 
 export function buildVisualContainmentTree(
-  collapsedNodes: CollapsedNode[],
+  collapsedRoots: CollapsedTreeNode[],
   options: BuildVisualContainmentTreeOptions = {},
 ): VctNode[] {
-  const nodeMap = new Map<string, VctNode>();
-  for (const node of collapsedNodes) nodeMap.set(node.id, toVctNode(node));
-
-  const rtree = buildSpatialIndex([...nodeMap.values()]);
-  const parentChoices = resolveParentChoices([...nodeMap.values()], nodeMap, rtree);
-  const roots = assembleVctForest([...nodeMap.values()], parentChoices);
+  const context = createBuildContext(collapsedRoots);
+  const parentChoices = resolveParentChoices(context);
+  const roots = assembleVctForest(context.nodes, parentChoices);
 
   finalizeVctMetadata(roots, options.alignmentResolver);
   return roots;
 }
 
-function toVctNode(node: CollapsedNode): VctNode {
+function createBuildContext(collapsedRoots: CollapsedTreeNode[]): BuildContext {
+  const nodes: VctNode[] = [];
+  const nodeMap = new Map<string, VctNode>();
+  const parentById = new Map<string, VctNode | null>();
+  const nearestClipBoundaryById = new Map<string, VctNode | null>();
+  const intervalsById = new Map<string, DomInterval>();
+  let visitClock = 0;
+  let rtree: RBush<SpatialItem> | null = null;
+
+  function visit(
+    collapsedNode: CollapsedTreeNode,
+    parent: VctNode | null,
+    nearestClipBoundary: VctNode | null,
+  ): VctNode {
+    const node = toVctNode(collapsedNode);
+    nodes.push(node);
+    nodeMap.set(node.id, node);
+    parentById.set(node.id, parent);
+    nearestClipBoundaryById.set(node.id, nearestClipBoundary);
+
+    const interval = { in: visitClock, out: visitClock };
+    visitClock += 1;
+    intervalsById.set(node.id, interval);
+
+    const childClipBoundary = node.maybeScrollRegion ? node : nearestClipBoundary;
+    for (const child of collapsedNode.children) visit(child, node, childClipBoundary);
+    interval.out = visitClock;
+    return node;
+  }
+
+  for (const root of collapsedRoots) visit(root, null, null);
+
+  return {
+    nodes,
+    nodeMap,
+    parentById,
+    nearestClipBoundaryById,
+    intervalsById,
+    getSpatialIndex: () => {
+      if (!rtree) rtree = buildSpatialIndex(nodes);
+      return rtree;
+    },
+  };
+}
+
+function toVctNode(node: CollapsedTreeNode): VctNode {
   return {
     ...node,
     collapsedDomNodeIds: [...node.collapsedDomNodeIds],
@@ -54,7 +110,7 @@ function toVctNode(node: CollapsedNode): VctNode {
 
 function buildSpatialIndex(nodes: VctNode[]): RBush<SpatialItem> {
   const rtree = new RBush<SpatialItem>();
-  for (const node of nodes) rtree.insert(toSpatialItem(node));
+  rtree.load(nodes.map(toSpatialItem));
   return rtree;
 }
 
@@ -68,35 +124,30 @@ function toSpatialItem(node: VctNode): SpatialItem {
   };
 }
 
-function resolveParentChoices(
-  nodes: VctNode[],
-  nodeMap: Map<string, VctNode>,
-  rtree: RBush<SpatialItem>,
-): Map<string, ParentChoice> {
+function resolveParentChoices(context: BuildContext): Map<string, ParentChoice> {
   const choices = new Map<string, ParentChoice>();
-  for (const node of nodes) choices.set(node.id, resolveParentChoice(node, nodeMap, rtree));
-  breakParentCycles(nodes, choices);
+  for (const node of context.nodes) choices.set(node.id, resolveParentChoice(node, context));
+  breakParentCycles(context.nodes, choices);
   return choices;
 }
 
 function resolveParentChoice(
   node: VctNode,
-  nodeMap: Map<string, VctNode>,
-  rtree: RBush<SpatialItem>,
+  context: BuildContext,
 ): ParentChoice {
-  const domParent = node.ctParentId ? nodeMap.get(node.ctParentId) : undefined;
-  if (domParent && isValidResolvedParent(node, domParent, nodeMap)) {
+  const domParent = context.parentById.get(node.id) ?? null;
+  if (domParent && isValidResolvedParent(node, domParent, context)) {
     return { parent: domParent, allowUncontainedParent: false };
   }
 
-  const domAncestor = findNearestValidDomAncestor(node, nodeMap);
+  const domAncestor = findNearestValidDomAncestor(node, context);
   if (domAncestor) return { parent: domAncestor, allowUncontainedParent: false };
 
-  const spatialParent = findBestSpatialParent(node, rtree, nodeMap);
+  const spatialParent = findBestSpatialParent(node, context.getSpatialIndex(), context);
   if (spatialParent) return { parent: spatialParent, allowUncontainedParent: false };
 
   if (!isFixedOrSticky(node)) {
-    const boundary = findNearestClipBoundary(node, nodeMap);
+    const boundary = context.nearestClipBoundaryById.get(node.id) ?? null;
     if (boundary) return { parent: boundary, allowUncontainedParent: true };
   }
 
@@ -106,65 +157,64 @@ function resolveParentChoice(
 function isValidResolvedParent(
   node: VctNode,
   candidateParent: VctNode,
-  nodeMap: Map<string, VctNode>,
+  context: BuildContext,
 ): boolean {
   return (
     respectsPositioningRule(node, candidateParent) &&
     respectsSpatialContainmentRule(node, candidateParent) &&
-    respectsClipBoundary(node, candidateParent, nodeMap)
+    respectsClipBoundary(node, candidateParent, context)
   );
 }
 
 function findNearestValidDomAncestor(
   node: VctNode,
-  nodeMap: Map<string, VctNode>,
+  context: BuildContext,
 ): VctNode | null {
-  let currentParentId = node.ctParentId ? nodeMap.get(node.ctParentId)?.ctParentId : null;
-  const seen = new Set<string>();
+  const parent = context.parentById.get(node.id) ?? null;
+  let current = parent ? context.parentById.get(parent.id) ?? null : null;
   let checked = 0;
 
-  while (currentParentId && checked < MAX_DOM_ANCESTOR_SEARCH_DEPTH && !seen.has(currentParentId)) {
-    seen.add(currentParentId);
+  while (current && checked < MAX_DOM_ANCESTOR_SEARCH_DEPTH) {
     checked += 1;
-    const ancestor = nodeMap.get(currentParentId);
-    if (!ancestor) return null;
-    if (isValidResolvedParent(node, ancestor, nodeMap)) return ancestor;
-    currentParentId = ancestor.ctParentId;
+    if (isValidResolvedParent(node, current, context)) return current;
+    current = context.parentById.get(current.id) ?? null;
   }
 
   return null;
 }
 
 function breakParentCycles(nodes: VctNode[], choices: Map<string, ParentChoice>): void {
+  const visitState = new Map<string, "visiting" | "visited">();
+
   for (const node of nodes) {
-    const choice = choices.get(node.id);
-    if (!choice?.parent) continue;
-    if (createsParentCycle(node, choice.parent, choices)) {
-      choices.set(node.id, { parent: null, allowUncontainedParent: false });
-    }
+    if (!visitState.has(node.id)) breakParentCyclesFrom(node, choices, visitState);
   }
 }
 
-function createsParentCycle(
+function breakParentCyclesFrom(
   node: VctNode,
-  parent: VctNode,
-  choices: ReadonlyMap<string, ParentChoice>,
-): boolean {
-  const seen = new Set<string>();
-  let current: VctNode | null = parent;
-  while (current) {
-    if (current.id === node.id) return true;
-    if (seen.has(current.id)) return false;
-    seen.add(current.id);
-    current = choices.get(current.id)?.parent ?? null;
+  choices: Map<string, ParentChoice>,
+  visitState: Map<string, "visiting" | "visited">,
+): void {
+  visitState.set(node.id, "visiting");
+
+  const parent = choices.get(node.id)?.parent ?? null;
+  if (parent) {
+    const parentState = visitState.get(parent.id);
+    if (parentState === "visiting") {
+      choices.set(node.id, { parent: null, allowUncontainedParent: false });
+    } else if (!parentState) {
+      breakParentCyclesFrom(parent, choices, visitState);
+    }
   }
-  return false;
+
+  visitState.set(node.id, "visited");
 }
 
 function findBestSpatialParent(
   node: VctNode,
   rtree: RBush<SpatialItem>,
-  nodeMap: Map<string, VctNode>,
+  context: BuildContext,
 ): VctNode | null {
   const candidates = rtree.search({
     minX: node.x,
@@ -173,15 +223,16 @@ function findBestSpatialParent(
     maxY: node.y + node.height,
   });
 
-  const validContainers = candidates
-    .map((item) => item.node)
-    .filter((candidate) => candidate !== node)
-    .filter((candidate) => !isSameOrDescendantOf(candidate, node.id, nodeMap))
-    .filter((candidate) => isValidResolvedParent(node, candidate, nodeMap));
+  let best: VctNode | null = null;
+  for (const item of candidates) {
+    const candidate = item.node;
+    if (candidate === node) continue;
+    if (isSameOrDescendantOf(candidate, node.id, context)) continue;
+    if (!isValidResolvedParent(node, candidate, context)) continue;
+    if (!best || candidate.area < best.area) best = candidate;
+  }
 
-  if (validContainers.length === 0) return null;
-  validContainers.sort((a, b) => a.area - b.area);
-  return validContainers[0];
+  return best;
 }
 
 function respectsSpatialContainmentRule(node: VctNode, candidate: VctNode): boolean {
@@ -200,45 +251,23 @@ function isFixedOrSticky(node: VctNode): boolean {
 function respectsClipBoundary(
   node: VctNode,
   candidateParent: VctNode,
-  nodeMap: Map<string, VctNode>,
+  context: BuildContext,
 ): boolean {
   if (isFixedOrSticky(node)) return true;
-  const boundary = findNearestClipBoundary(node, nodeMap);
+  const boundary = context.nearestClipBoundaryById.get(node.id) ?? null;
   if (!boundary) return true;
-  return isSameOrDescendantOf(candidateParent, boundary.id, nodeMap);
-}
-
-function findNearestClipBoundary(node: VctNode, nodeMap: Map<string, VctNode>): VctNode | null {
-  let currentParentId = node.ctParentId;
-  const seen = new Set<string>();
-
-  while (currentParentId && !seen.has(currentParentId)) {
-    seen.add(currentParentId);
-    const parent = nodeMap.get(currentParentId);
-    if (!parent) return null;
-    if (parent.maybeScrollRegion) return parent;
-    currentParentId = parent.ctParentId;
-  }
-
-  return null;
+  return isSameOrDescendantOf(candidateParent, boundary.id, context);
 }
 
 function isSameOrDescendantOf(
   node: VctNode,
   ancestorId: string,
-  nodeMap: Map<string, VctNode>,
+  context: BuildContext,
 ): boolean {
-  if (node.id === ancestorId) return true;
-
-  let currentParentId = node.ctParentId;
-  const seen = new Set<string>();
-  while (currentParentId && !seen.has(currentParentId)) {
-    if (currentParentId === ancestorId) return true;
-    seen.add(currentParentId);
-    currentParentId = nodeMap.get(currentParentId)?.ctParentId ?? null;
-  }
-
-  return false;
+  const nodeInterval = context.intervalsById.get(node.id);
+  const ancestorInterval = context.intervalsById.get(ancestorId);
+  if (!nodeInterval || !ancestorInterval) return false;
+  return ancestorInterval.in <= nodeInterval.in && nodeInterval.out <= ancestorInterval.out;
 }
 
 function assembleVctForest(nodes: VctNode[], choices: ReadonlyMap<string, ParentChoice>): VctNode[] {

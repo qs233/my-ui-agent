@@ -1,4 +1,4 @@
-import type { CollapsedNode, CollapsedTreeNode, DomNodeRecord } from "./types.js";
+import type { CollapsedTreeNode, DomNodeRecord } from "./types.js";
 
 interface DomTreeNode {
   record: DomNodeRecord;
@@ -28,7 +28,7 @@ export const PRESERVE_COLLAPSE_BOUNDARY_TAGS = new Set([
   "dialog",
 ]);
 
-export function collapseDomTree(domNodes: DomNodeRecord[]): CollapsedNode[] {
+export function collapseDomTree(domNodes: DomNodeRecord[]): CollapsedTreeNode[] {
   const domMap = new Map<string, DomTreeNode>();
   for (const record of domNodes) domMap.set(record.id, { record: { ...record, childIds: [...record.childIds] }, children: [] });
 
@@ -41,7 +41,8 @@ export function collapseDomTree(domNodes: DomNodeRecord[]): CollapsedNode[] {
     (node) => !node.record.parentId || !domMap.has(node.record.parentId),
   );
   const collapsedRoots = roots.map(collapsePostOrder);
-  return flattenCollapsedDom(collapsedRoots);
+  normalizeCollapsedParents(collapsedRoots);
+  return collapsedRoots;
 }
 
 function collapsePostOrder(domNode: DomTreeNode): CollapsedTreeNode {
@@ -106,27 +107,13 @@ function collapseWrapperIntoChild(parent: CollapsedTreeNode, child: CollapsedTre
   return child;
 }
 
-function flattenCollapsedDom(roots: CollapsedTreeNode[]): CollapsedNode[] {
-  const flattened: CollapsedNode[] = [];
-
+function normalizeCollapsedParents(roots: CollapsedTreeNode[]): void {
   function visit(node: CollapsedTreeNode, parentId: string | null): void {
     node.ctParentId = parentId;
-    const { children, ...collapsed } = node;
-    flattened.push(cloneCollapsedNode(collapsed as CollapsedNode));
-    for (const child of children) visit(child, node.id);
+    for (const child of node.children) visit(child, node.id);
   }
 
   for (const root of roots) visit(root, null);
-  return flattened;
-}
-
-function cloneCollapsedNode(node: CollapsedNode): CollapsedNode {
-  return {
-    ...node,
-    collapsedDomNodeIds: [...node.collapsedDomNodeIds],
-    visualBounds: { ...node.visualBounds },
-    ownBounds: { ...node.ownBounds },
-  };
 }
 
 function applyVisualBounds(target: CollapsedTreeNode, source: CollapsedTreeNode): void {

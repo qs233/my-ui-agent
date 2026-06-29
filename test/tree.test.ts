@@ -5,7 +5,7 @@ import { computeOverlapRatios, isApproximatelyContained } from "../src/geometry.
 import { serializeOverviewText } from "../src/serialize.js";
 import { buildVisualContainmentTree } from "../src/tree.js";
 import { truncateText } from "../src/text.js";
-import type { CollapsedNode, DomNodeRecord, VctNode } from "../src/types.js";
+import type { CollapsedNode, CollapsedTreeNode, DomNodeRecord, VctNode } from "../src/types.js";
 
 test("overlap ratios distinguish full containment and approximate floating containment", () => {
   const full = computeOverlapRatios(
@@ -52,7 +52,7 @@ test("isApproximatelyContained rejects larger children and high parent occupancy
 });
 
 test("collapseDomTree collapses a fully containing single-child wrapper", () => {
-  const collapsed = collapseDomTree([
+  const collapsed = flattenCollapsedTree(collapseDomTree([
     node({ id: "wrapper", tagName: "div", width: 120, height: 60, paintOrder: 1 }),
     node({
       id: "label",
@@ -65,7 +65,7 @@ test("collapseDomTree collapses a fully containing single-child wrapper", () => 
       domParentId: "wrapper",
       paintOrder: 2,
     }),
-  ]);
+  ]));
 
   assert.equal(collapsed.length, 1);
   assert.equal(collapsed[0].id, "label");
@@ -79,7 +79,7 @@ test("collapseDomTree collapses a fully containing single-child wrapper", () => 
 });
 
 test("collapseDomTree does not collapse approximate-only containment", () => {
-  const collapsed = collapseDomTree([
+  const collapsed = flattenCollapsedTree(collapseDomTree([
     node({ id: "wrapper", tagName: "div", width: 100, height: 100, paintOrder: 1 }),
     node({
       id: "child",
@@ -90,14 +90,14 @@ test("collapseDomTree does not collapse approximate-only containment", () => {
       domParentId: "wrapper",
       paintOrder: 2,
     }),
-  ]);
+  ]));
 
   assert.equal(collapsed.some((item) => item.id === "wrapper"), true);
   assert.equal(collapsed.find((item) => item.id === "child")?.ctParentId, "wrapper");
 });
 
 test("collapseDomTree requires parent paint order before or equal to child", () => {
-  const collapsed = collapseDomTree([
+  const collapsed = flattenCollapsedTree(collapseDomTree([
     node({ id: "wrapper", tagName: "div", width: 100, height: 100, paintOrder: 3 }),
     node({
       id: "child",
@@ -107,14 +107,14 @@ test("collapseDomTree requires parent paint order before or equal to child", () 
       domParentId: "wrapper",
       paintOrder: 2,
     }),
-  ]);
+  ]));
 
   assert.equal(collapsed.some((item) => item.id === "wrapper"), true);
   assert.equal(collapsed.find((item) => item.id === "child")?.ctParentId, "wrapper");
 });
 
 test("preserved tags block collapse as parent or child", () => {
-  const collapsed = collapseDomTree([
+  const collapsed = flattenCollapsedTree(collapseDomTree([
     node({ id: "svg", tagName: "svg", width: 100, height: 100, paintOrder: 1 }),
     node({ id: "path", tagName: "path", width: 100, height: 100, domParentId: "svg", paintOrder: 2 }),
     node({ id: "wrapper", tagName: "div", x: 200, width: 100, height: 40, paintOrder: 1 }),
@@ -150,7 +150,7 @@ test("preserved tags block collapse as parent or child", () => {
       isInteractive: true,
       paintOrder: 2,
     }),
-  ]);
+  ]));
 
   assert.equal(collapsed.find((item) => item.id === "path")?.ctParentId, "svg");
   assert.equal(collapsed.find((item) => item.id === "button")?.ctParentId, "wrapper");
@@ -159,7 +159,7 @@ test("preserved tags block collapse as parent or child", () => {
 });
 
 test("collapsed wrapper IDs are outer-to-inner and exclude the representative node", () => {
-  const collapsed = collapseDomTree([
+  const collapsed = flattenCollapsedTree(collapseDomTree([
     node({ id: "outer", tagName: "div", width: 120, height: 60, paintOrder: 1 }),
     node({
       id: "inner",
@@ -181,7 +181,7 @@ test("collapsed wrapper IDs are outer-to-inner and exclude the representative no
       domParentId: "inner",
       paintOrder: 3,
     }),
-  ]);
+  ]));
 
   assert.equal(collapsed.length, 1);
   assert.equal(collapsed[0].id, "label");
@@ -224,7 +224,7 @@ test("buildVisualContainmentTree marks collapsed representatives", () => {
 });
 
 test("collapsed representatives inherit wrapper layout properties", () => {
-  const collapsed = collapseDomTree([
+  const collapsed = flattenCollapsedTree(collapseDomTree([
     node({ id: "positioned-wrapper", width: 120, height: 60, position: "relative", zIndex: 10, paintOrder: 1 }),
     node({
       id: "label",
@@ -236,7 +236,7 @@ test("collapsed representatives inherit wrapper layout properties", () => {
       domParentId: "positioned-wrapper",
       paintOrder: 2,
     }),
-  ]);
+  ]));
 
   assert.equal(collapsed[0].id, "label");
   assert.equal(collapsed[0].position, "relative");
@@ -244,7 +244,7 @@ test("collapsed representatives inherit wrapper layout properties", () => {
 });
 
 test("fixed or sticky nodes are preserved as collapse boundaries", () => {
-  const collapsed = collapseDomTree([
+  const collapsed = flattenCollapsedTree(collapseDomTree([
     node({ id: "body", tagName: "body", width: 1000, height: 1000, paintOrder: 1 }),
     node({
       id: "modal",
@@ -260,7 +260,7 @@ test("fixed or sticky nodes are preserved as collapse boundaries", () => {
     }),
     node({ id: "sticky", tagName: "div", x: 500, width: 100, height: 100, position: "sticky", paintOrder: 1 }),
     node({ id: "sticky-child", tagName: "span", x: 500, width: 100, height: 100, domParentId: "sticky", paintOrder: 2 }),
-  ]);
+  ]));
 
   assert.equal(collapsed.some((item) => item.id === "body"), true);
   assert.equal(collapsed.find((item) => item.id === "modal")?.ctParentId, "body");
@@ -268,7 +268,7 @@ test("fixed or sticky nodes are preserved as collapse boundaries", () => {
 });
 
 test("maybe scroll region nodes are preserved as collapse boundaries", () => {
-  const collapsed = collapseDomTree([
+  const collapsed = flattenCollapsedTree(collapseDomTree([
     node({ id: "scroll-parent", tagName: "div", width: 100, height: 100, maybeScrollRegion: true, paintOrder: 1 }),
     node({ id: "child", tagName: "span", width: 100, height: 100, domParentId: "scroll-parent", paintOrder: 2 }),
     node({ id: "parent", tagName: "div", x: 200, width: 100, height: 100, paintOrder: 1 }),
@@ -282,7 +282,7 @@ test("maybe scroll region nodes are preserved as collapse boundaries", () => {
       maybeScrollRegion: true,
       paintOrder: 2,
     }),
-  ]);
+  ]));
 
   assert.equal(collapsed.find((item) => item.id === "child")?.ctParentId, "scroll-parent");
   assert.equal(collapsed.find((item) => item.id === "scroll-child")?.ctParentId, "parent");
@@ -411,35 +411,37 @@ test("buildVisualContainmentTree uses approximate containment for visual parents
 
 test("buildVisualContainmentTree tries nearby DOM ancestors before spatial parents", () => {
   const tree = buildVisualContainmentTree([
-    collapsedNode({ id: "ancestor", tagName: "section", width: 300, height: 300, paintOrder: 1 }),
-    collapsedNode({
-      id: "bad-parent",
-      tagName: "div",
-      width: 20,
-      height: 20,
-      ctParentId: "ancestor",
-      paintOrder: 2,
-    }),
-    collapsedNode({
-      id: "spatial-card",
-      tagName: "aside",
-      x: 10,
-      y: 10,
-      width: 50,
-      height: 50,
-      ctParentId: "ancestor",
-      paintOrder: 2,
-    }),
-    collapsedNode({
-      id: "child",
-      tagName: "span",
-      x: 10,
-      y: 10,
-      width: 40,
-      height: 40,
-      ctParentId: "bad-parent",
-      paintOrder: 3,
-    }),
+    collapsedTreeNode({ id: "ancestor", tagName: "section", width: 300, height: 300, paintOrder: 1 }, [
+      collapsedTreeNode({
+        id: "bad-parent",
+        tagName: "div",
+        width: 20,
+        height: 20,
+        ctParentId: "ancestor",
+        paintOrder: 2,
+      }, [
+        collapsedTreeNode({
+          id: "child",
+          tagName: "span",
+          x: 10,
+          y: 10,
+          width: 40,
+          height: 40,
+          ctParentId: "bad-parent",
+          paintOrder: 3,
+        }),
+      ]),
+      collapsedTreeNode({
+        id: "spatial-card",
+        tagName: "aside",
+        x: 10,
+        y: 10,
+        width: 50,
+        height: 50,
+        ctParentId: "ancestor",
+        paintOrder: 2,
+      }),
+    ]),
   ]);
 
   const ancestor = findVctNode(tree, "ancestor");
@@ -742,7 +744,10 @@ function node(overrides: NodeOverrides): DomNodeRecord {
   return raw;
 }
 
-function collapsedNode(overrides: Partial<CollapsedNode> & { id: string }): CollapsedNode {
+function collapsedTreeNode(
+  overrides: Partial<CollapsedNode> & { id: string },
+  children: CollapsedTreeNode[] = [],
+): CollapsedTreeNode {
   const width = overrides.width ?? 100;
   const height = overrides.height ?? 100;
   const bounds = {
@@ -773,7 +778,26 @@ function collapsedNode(overrides: Partial<CollapsedNode> & { id: string }): Coll
     position: overrides.position ?? "static",
     zIndex: overrides.zIndex,
     maybeScrollRegion: overrides.maybeScrollRegion ?? false,
+    children,
   };
+}
+
+function flattenCollapsedTree(roots: CollapsedTreeNode[]): CollapsedNode[] {
+  const collapsed: CollapsedNode[] = [];
+
+  function visit(node: CollapsedTreeNode): void {
+    const { children: _children, ...collapsedNode } = node;
+    collapsed.push({
+      ...collapsedNode,
+      collapsedDomNodeIds: [...collapsedNode.collapsedDomNodeIds],
+      visualBounds: { ...collapsedNode.visualBounds },
+      ownBounds: { ...collapsedNode.ownBounds },
+    });
+    for (const child of node.children) visit(child);
+  }
+
+  for (const root of roots) visit(root);
+  return collapsed;
 }
 
 function buildOverviewTree(rawNodes: DomNodeRecord[]): VctNode[] {

@@ -8,6 +8,7 @@ import type {
   Bounds,
   CaptureOverviewOptions,
   CollapsedNode,
+  CollapsedTreeNode,
   DomNodeRecord,
   SnapshotOptions,
   VctSnapshot,
@@ -21,6 +22,7 @@ export type {
   Bounds,
   CaptureOverviewOptions,
   CollapsedNode,
+  CollapsedTreeNode,
   DecodedLayoutElement,
   DecodedLayoutNode,
   DecodedLayoutText,
@@ -74,12 +76,30 @@ export async function captureOverview(url: string, options: CaptureOverviewOptio
   }
 }
 
-function createVctSnapshot(domNodes: DomNodeRecord[], collapsedNodes: CollapsedNode[]): VctSnapshot {
+function createVctSnapshot(domNodes: DomNodeRecord[], collapsedRoots: CollapsedTreeNode[]): VctSnapshot {
   return {
     domNodes: new Map(domNodes.map((node) => [node.id, node])),
-    collapsedNodes: new Map(collapsedNodes.map((node) => [node.id, node])),
-    vctRoots: buildVisualContainmentTree(collapsedNodes),
+    collapsedNodes: flattenCollapsedNodes(collapsedRoots),
+    vctRoots: buildVisualContainmentTree(collapsedRoots),
   };
+}
+
+function flattenCollapsedNodes(roots: CollapsedTreeNode[]): Map<string, CollapsedNode> {
+  const collapsedNodes = new Map<string, CollapsedNode>();
+
+  function visit(node: CollapsedTreeNode): void {
+    const { children: _children, ...collapsedNode } = node;
+    collapsedNodes.set(node.id, {
+      ...collapsedNode,
+      collapsedDomNodeIds: [...collapsedNode.collapsedDomNodeIds],
+      visualBounds: { ...collapsedNode.visualBounds },
+      ownBounds: { ...collapsedNode.ownBounds },
+    });
+    for (const child of node.children) visit(child);
+  }
+
+  for (const root of roots) visit(root);
+  return collapsedNodes;
 }
 
 export async function hasScrollableOverflow(page: Page, domNodeId: string): Promise<boolean> {
