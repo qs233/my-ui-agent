@@ -39,6 +39,8 @@ function formatNode(
   if (node.name) parts.push(`name=${quote(node.name)}`);
   if (node.text) parts.push(`text=${quote(truncateText(node.text, options.textMaxLength ?? 80))}`);
   if (node.maybeScrollRegion) parts.push("maybe-scroll");
+  if (!node.isVisible) parts.push("invisible");
+  if (node.isInvisibleOverflowBoundary) parts.push("invisible-overflow-boundary");
   if (node.isCollapsed) parts.push("collapsed");
   if (node.floating) parts.push("floating");
   if (node.isReparented) {

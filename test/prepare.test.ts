@@ -4,45 +4,10 @@ import type { Page } from "playwright";
 import { collapseDomTree } from "../src/compress.js";
 import { intersectsExpandedViewport } from "../src/geometry.js";
 import { captureVisibleNodes } from "../src/index.js";
-import { decodeSnapshot, prepareNodes, visibleNodesFromSnapshot } from "../src/prepare.js";
-import type {
-  Bounds,
-  DecodedLayoutElement,
-  DecodedLayoutNode,
-  DecodedLayoutText,
-  SnapshotResponse,
-} from "../src/types.js";
-
-test("decodeSnapshot keeps element and text layout nodes while skipping pseudo elements", () => {
-  const strings = ["", "#document", "HTML", "BODY", "#text", "::before", "Visible", "Generated", "block", "visible", "1", "static", "auto"];
-  const styles = [8, 9, 10, 9, 11, 12, 9, 9, 9, 12, 12];
-  const snapshot: SnapshotResponse = {
-    strings,
-    documents: [{
-      nodes: {
-        parentIndex: [-1, 0, 1, 2, 2, 4],
-        nodeType: [9, 1, 1, 3, 1, 3],
-        nodeName: [1, 2, 3, 4, 5, 4],
-        backendNodeId: [0, 1, 2, 3, 4, 5],
-        attributes: [[], [], [], [], [], []],
-        pseudoType: { index: [4], value: [0] },
-      },
-      layout: {
-        nodeIndex: [1, 2, 3, 4, 5],
-        bounds: [rect(0, 0, 300, 200), rect(0, 0, 300, 200), rect(10, 10, 60, 20), rect(0, 0, 80, 20), rect(0, 0, 80, 20)],
-        text: [0, 0, 6, 0, 7],
-        styles: [styles, styles, [], styles, []],
-        paintOrders: [1, 1, 2, 2, 2],
-      },
-    }],
-  };
-
-  const decoded = decodeSnapshot(snapshot);
-  assert.deepEqual(decoded.map((node) => node.nodeType), [1, 1, 3, 3]);
-  assert.equal(decoded.some((node) => node.nodeIndex === 4), false);
-  const pseudoText = decoded.find((node) => node.nodeIndex === 5);
-  assert.equal(pseudoText?.parentElementNodeIndex, 2);
-});
+import { visibleNodesFromSnapshot } from "../src/prepare.js";
+import { prepareNodes } from "./decoded-helpers.js";
+import type { DecodedLayoutElement, DecodedLayoutNode, DecodedLayoutText } from "./decoded-helpers.js";
+import type { Bounds, SnapshotResponse } from "../src/types.js";
 
 test("prepareNodes filters rendered visibility and rewrites retained parents", () => {
   const decoded: DecodedLayoutNode[] = [
@@ -88,6 +53,90 @@ test("prepareNodes marks maybe scroll regions from overflow styles", () => {
   assert.equal(raw.find((node) => node.id === "2")?.maybeScrollRegion, true);
   assert.equal(raw.find((node) => node.id === "3")?.maybeScrollRegion, true);
   assert.equal(raw.find((node) => node.id === "4")?.maybeScrollRegion, false);
+});
+
+test("prepareNodes assigns overflow scope metadata", () => {
+  const raw = prepareNodes([
+    element(1, null),
+    element(2, 1, { styles: styleMap({ overflow: "auto" }) }),
+    element(3, 2),
+  ]);
+
+  assert.equal(raw.find((node) => node.id === "1")?.boxOverflowScopeId, "viewport");
+  assert.equal(raw.find((node) => node.id === "2")?.boxOverflowScopeId, "viewport");
+  assert.equal(raw.find((node) => node.id === "2")?.ownedOverflowScopeId, "overflow:2");
+  assert.equal(raw.find((node) => node.id === "3")?.boxOverflowScopeId, "overflow:2");
+});
+
+test("prepareNodes retains hidden positive overflow owners as invisible overflow boundaries", () => {
+  const raw = prepareNodes([
+    element(1, null),
+    element(2, 1, { styles: styleMap({ overflow: "auto", visibility: "hidden" }) }),
+    element(3, 2, { styles: styleMap({ visibility: "visible" }) }),
+    text(4, 3, "Visible child"),
+  ]);
+
+  assert.deepEqual(raw.map((node) => node.id), ["1", "2", "3"]);
+  const owner = raw.find((node) => node.id === "2");
+  assert.equal(owner?.isVisible, false);
+  assert.equal(owner?.isInvisibleOverflowBoundary, true);
+  assert.equal(owner?.ownedOverflowScopeId, "overflow:2");
+  assert.equal(raw.find((node) => node.id === "3")?.parentId, "2");
+  assert.equal(raw.find((node) => node.id === "3")?.boxOverflowScopeId, "overflow:2");
+  assert.equal(raw.find((node) => node.id === "3")?.text, "Visible child");
+});
+
+test("prepareNodes does not retain hidden overflow owners without visible owned-scope descendants", () => {
+  const raw = prepareNodes([
+    element(1, null),
+    element(2, 1, { styles: styleMap({ overflow: "auto", visibility: "hidden" }) }),
+  ]);
+
+  assert.deepEqual(raw.map((node) => node.id), ["1"]);
+});
+
+test("prepareNodes does not retain zero-size hidden overflow owners", () => {
+  const raw = prepareNodes([
+    element(1, null),
+    element(2, 1, { width: 0, height: 0, styles: styleMap({ overflow: "auto", visibility: "hidden" }) }),
+    element(3, 2, { styles: styleMap({ visibility: "visible" }) }),
+  ]);
+
+  assert.deepEqual(raw.map((node) => node.id), ["1"]);
+});
+
+test("prepareNodes resolves absolute overflow scope from containing block", () => {
+  const outsideCb = prepareNodes([
+    element(1, null),
+    element(2, 1, { styles: styleMap({ position: "relative" }) }),
+    element(3, 2, { styles: styleMap({ overflow: "auto" }) }),
+    element(4, 3, { styles: styleMap({ position: "absolute" }) }),
+  ]);
+  assert.equal(outsideCb.find((node) => node.id === "4")?.boxOverflowScopeId, "viewport");
+
+  const ownerCb = prepareNodes([
+    element(1, null),
+    element(2, 1, { styles: styleMap({ overflow: "auto", position: "relative" }) }),
+    element(3, 2, { styles: styleMap({ position: "absolute" }) }),
+  ]);
+  assert.equal(ownerCb.find((node) => node.id === "3")?.boxOverflowScopeId, "overflow:2");
+});
+
+test("prepareNodes resolves fixed overflow scope from transform containing block", () => {
+  const viewportFixed = prepareNodes([
+    element(1, null),
+    element(2, 1, { styles: styleMap({ overflow: "auto" }) }),
+    element(3, 2, { styles: styleMap({ position: "fixed" }) }),
+  ]);
+  assert.equal(viewportFixed.find((node) => node.id === "3")?.boxOverflowScopeId, "viewport");
+
+  const transformedFixed = prepareNodes([
+    element(1, null),
+    element(2, 1, { styles: styleMap({ overflow: "auto" }) }),
+    element(3, 2, { styles: styleMap({ transform: "translateX(0)" }) }),
+    element(4, 3, { styles: styleMap({ position: "fixed" }) }),
+  ]);
+  assert.equal(transformedFixed.find((node) => node.id === "4")?.boxOverflowScopeId, "overflow:2");
 });
 
 test("visibleNodesFromSnapshot prepares retained nodes directly from snapshot", () => {
@@ -168,6 +217,59 @@ test("visibleNodesFromSnapshot prepares retained nodes directly from snapshot", 
   assert.deepEqual(raw.map((node) => node.id), ["1", "2", "3", "5"]);
   assert.equal(raw.find((node) => node.id === "5")?.parentId, "3");
   assert.equal(raw.find((node) => node.id === "5")?.text, "Submit Generated");
+});
+
+test("visibleNodesFromSnapshot retains hidden invisible overflow boundaries", () => {
+  const strings = [
+    "",
+    "#document",
+    "HTML",
+    "BODY",
+    "DIV",
+    "#text",
+    "Visible child",
+    "block",
+    "visible",
+    "hidden",
+    "1",
+    "static",
+    "auto",
+  ];
+  const visibleStyles = [7, 8, 10, 8, 11, 12, 8, 8, 8, 12, 12];
+  const hiddenOverflowStyles = [7, 9, 10, 8, 11, 12, 12, 12, 12, 12, 12];
+  const snapshot: SnapshotResponse = {
+    strings,
+    documents: [{
+      nodes: {
+        parentIndex: [-1, 0, 1, 2, 3, 4],
+        nodeType: [9, 1, 1, 1, 1, 3],
+        nodeName: [1, 2, 3, 4, 4, 5],
+        backendNodeId: [0, 1, 2, 3, 4, 0],
+        attributes: [[], [], [], [], [], []],
+      },
+      layout: {
+        nodeIndex: [1, 2, 3, 4, 5],
+        bounds: [
+          rect(0, 0, 400, 300),
+          rect(0, 0, 400, 300),
+          rect(10, 10, 200, 120),
+          rect(20, 20, 80, 20),
+          rect(20, 20, 70, 10),
+        ],
+        text: [0, 0, 0, 0, 6],
+        styles: [visibleStyles, visibleStyles, hiddenOverflowStyles, visibleStyles, []],
+        paintOrders: [1, 1, 2, 3, 4],
+      },
+    }],
+  };
+
+  const raw = visibleNodesFromSnapshot(snapshot);
+  assert.deepEqual(raw.map((node) => node.id), ["1", "2", "3", "4"]);
+  assert.equal(raw.find((node) => node.id === "3")?.isInvisibleOverflowBoundary, true);
+  assert.equal(raw.find((node) => node.id === "3")?.isVisible, false);
+  assert.equal(raw.find((node) => node.id === "3")?.ownedOverflowScopeId, "overflow:3");
+  assert.equal(raw.find((node) => node.id === "4")?.parentId, "3");
+  assert.equal(raw.find((node) => node.id === "4")?.boxOverflowScopeId, "overflow:3");
 });
 
 test("intersectsExpandedViewport accepts meaningful viewport overlap", () => {
@@ -332,6 +434,22 @@ test("a retained element with no retained children becomes LEAF during collapse"
   assert.equal("type" in collapsed[0] ? collapsed[0].type : undefined, "LEAF");
 });
 
+test("collapseDomTree preserves invisible overflow boundaries", () => {
+  const raw = prepareNodes([
+    element(1, null),
+    element(2, 1, { styles: styleMap({ overflow: "auto", visibility: "hidden" }) }),
+    element(3, 2, { styles: styleMap({ visibility: "visible" }) }),
+  ]);
+  const collapsed = collapseDomTree(raw);
+  const root = collapsed[0];
+  const boundary = root?.children[0];
+
+  assert.equal(boundary?.id, "2");
+  assert.equal(boundary?.isInvisibleOverflowBoundary, true);
+  assert.equal(boundary?.ownedOverflowScopeId, "overflow:2");
+  assert.equal(boundary?.children[0]?.id, "3");
+});
+
 function element(
   nodeIndex: number,
   parentElementNodeIndex: number | null,
@@ -386,7 +504,7 @@ function rect(x: number, y: number, width: number, height: number): number[] {
 }
 
 function styleMap(overrides: Record<string, string> = {}): ReadonlyMap<string, string> {
-  return new Map(Object.entries({
+  const styles = {
     display: "block",
     visibility: "visible",
     opacity: "1",
@@ -398,8 +516,16 @@ function styleMap(overrides: Record<string, string> = {}): ReadonlyMap<string, s
     "overflow-y": "visible",
     "pointer-events": "auto",
     cursor: "auto",
+    transform: "none",
+    filter: "none",
+    perspective: "none",
+    contain: "none",
+    "will-change": "auto",
     ...overrides,
-  }));
+  };
+  if (overrides.overflow && !("overflow-x" in overrides)) styles["overflow-x"] = overrides.overflow;
+  if (overrides.overflow && !("overflow-y" in overrides)) styles["overflow-y"] = overrides.overflow;
+  return new Map(Object.entries(styles));
 }
 
 function viewportSnapshot(): SnapshotResponse {

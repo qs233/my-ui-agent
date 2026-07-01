@@ -13,6 +13,11 @@ export const COMPUTED_STYLES = [
   "overflow-y",
   "pointer-events",
   "cursor",
+  "transform",
+  "filter",
+  "perspective",
+  "contain",
+  "will-change",
 ] as const;
 
 export async function captureSnapshot(page: Page): Promise<SnapshotResponse> {

@@ -39,33 +39,6 @@ export interface SnapshotResponse {
   strings: string[];
 }
 
-export interface DecodedLayoutNodeBase {
-  nodeIndex: number;
-  parentElementNodeIndex: number | null;
-  bounds: Bounds;
-  paintOrder: number;
-}
-
-export interface DecodedLayoutElement extends DecodedLayoutNodeBase {
-  nodeType: 1;
-  backendNodeId: number;
-  tagName: string;
-  attributes: ReadonlyMap<string, string>;
-  styles: ReadonlyMap<string, string>;
-}
-
-export interface DecodedLayoutText extends DecodedLayoutNodeBase {
-  nodeType: 3;
-  sourceNodeType: 1 | 3;
-  text: string;
-}
-
-export type DecodedLayoutNode = DecodedLayoutElement | DecodedLayoutText;
-
-export interface RetainedLayoutElement extends DecodedLayoutElement {
-  readonly retained: true;
-}
-
 export type DomNodeId = string;
 
 export interface DomNodeRecord extends Bounds {
@@ -82,6 +55,12 @@ export interface DomNodeRecord extends Bounds {
   zIndex?: number;
   isInteractive: boolean;
   maybeScrollRegion: boolean;
+  overflowX: string;
+  overflowY: string;
+  boxOverflowScopeId: string;
+  ownedOverflowScopeId?: string;
+  isVisible: boolean;
+  isInvisibleOverflowBoundary: boolean;
 }
 
 export interface RawNode extends DomNodeRecord {}
@@ -101,6 +80,12 @@ export interface BaseCollapsedNode extends Bounds {
   position: string;
   zIndex?: number;
   maybeScrollRegion: boolean;
+  overflowX: string;
+  overflowY: string;
+  boxOverflowScopeId: string;
+  ownedOverflowScopeId?: string;
+  isVisible: boolean;
+  isInvisibleOverflowBoundary: boolean;
 }
 
 export interface LeafNode extends BaseCollapsedNode {

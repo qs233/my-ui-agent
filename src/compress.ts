@@ -51,8 +51,9 @@ function collapsePostOrder(domNode: DomTreeNode): CollapsedTreeNode {
 
   if (node.children.length !== 1) return node;
   const child = node.children[0];
-  if (!canCollapseSingleChildWrapper(node, child)) return node;
-  return collapseWrapperIntoChild(node, child);
+  if (canCollapseParentIntoChild(node, child)) return collapseParentIntoChild(node, child);
+  if (canCollapseChildIntoParent(node, child)) return collapseChildIntoParent(node, child);
+  return node;
 }
 
 function classifyNode(record: DomNodeRecord, children: CollapsedTreeNode[]): CollapsedTreeNode {
@@ -76,6 +77,12 @@ function classifyNode(record: DomNodeRecord, children: CollapsedTreeNode[]): Col
     position: record.position,
     zIndex: record.zIndex,
     maybeScrollRegion: record.maybeScrollRegion,
+    overflowX: record.overflowX,
+    overflowY: record.overflowY,
+    boxOverflowScopeId: record.boxOverflowScopeId,
+    ownedOverflowScopeId: record.ownedOverflowScopeId,
+    isVisible: record.isVisible,
+    isInvisibleOverflowBoundary: record.isInvisibleOverflowBoundary,
     children,
   };
 
@@ -86,16 +93,17 @@ function classifyNode(record: DomNodeRecord, children: CollapsedTreeNode[]): Col
   return base;
 }
 
-function canCollapseSingleChildWrapper(parent: CollapsedTreeNode, child: CollapsedTreeNode): boolean {
+function canCollapseParentIntoChild(parent: CollapsedTreeNode, child: CollapsedTreeNode): boolean {
   if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(parent.tagName)) return false;
   if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(child.tagName)) return false;
   if (shouldPreservePositionedBoundary(parent, child)) return false;
   if (parent.maybeScrollRegion || child.maybeScrollRegion) return false;
+  if (parent.isInvisibleOverflowBoundary || child.isInvisibleOverflowBoundary) return false;
   if (parent.paintOrder > child.paintOrder) return false;
   return isFullyContained(child, parent);
 }
 
-function collapseWrapperIntoChild(parent: CollapsedTreeNode, child: CollapsedTreeNode): CollapsedTreeNode {
+function collapseParentIntoChild(parent: CollapsedTreeNode, child: CollapsedTreeNode): CollapsedTreeNode {
   child.collapsedDomNodeIds = [
     ...parent.collapsedDomNodeIds,
     parent.representativeDomNodeId,
@@ -105,6 +113,27 @@ function collapseWrapperIntoChild(parent: CollapsedTreeNode, child: CollapsedTre
   applyVisualBounds(child, parent);
   inheritLayoutProperties(child, parent);
   return child;
+}
+
+function canCollapseChildIntoParent(parent: CollapsedTreeNode, child: CollapsedTreeNode): boolean {
+  if (!parent.maybeScrollRegion) return false;
+  if (child.children.length === 0) return false;
+  if (PRESERVE_COLLAPSE_BOUNDARY_TAGS.has(child.tagName)) return false;
+  if (child.maybeScrollRegion) return false;
+  if (child.isInvisibleOverflowBoundary) return false;
+  if (isFixedOrSticky(child)) return false;
+  if (parent.paintOrder > child.paintOrder) return false;
+  return isFullyContained(child, parent);
+}
+
+function collapseChildIntoParent(parent: CollapsedTreeNode, child: CollapsedTreeNode): CollapsedTreeNode {
+  parent.collapsedDomNodeIds = [
+    ...parent.collapsedDomNodeIds,
+    child.representativeDomNodeId,
+    ...child.collapsedDomNodeIds,
+  ];
+  parent.children = child.children;
+  return parent;
 }
 
 function normalizeCollapsedParents(roots: CollapsedTreeNode[]): void {

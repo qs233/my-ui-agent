@@ -288,6 +288,140 @@ test("maybe scroll region nodes are preserved as collapse boundaries", () => {
   assert.equal(collapsed.find((item) => item.id === "scroll-child")?.ctParentId, "parent");
 });
 
+test("maybe scroll region parent absorbs a plain child wrapper", () => {
+  const roots = collapseDomTree([
+    node({
+      id: "scroll-parent",
+      tagName: "div",
+      width: 200,
+      height: 200,
+      maybeScrollRegion: true,
+      overflowY: "auto",
+      ownedOverflowScopeId: "overflow:1",
+      boxOverflowScopeId: "viewport",
+      paintOrder: 1,
+    }),
+    node({
+      id: "wrapper",
+      tagName: "div",
+      x: 10,
+      y: 10,
+      width: 160,
+      height: 160,
+      domParentId: "scroll-parent",
+      paintOrder: 2,
+    }),
+    node({ id: "item-a", tagName: "span", x: 20, y: 20, width: 40, height: 30, domParentId: "wrapper", paintOrder: 3 }),
+    node({ id: "item-b", tagName: "span", x: 80, y: 20, width: 40, height: 30, domParentId: "wrapper", paintOrder: 3 }),
+  ]);
+
+  assert.equal(roots.length, 1);
+  const scrollParent = roots[0];
+  assert.equal(scrollParent.id, "scroll-parent");
+  assert.equal(scrollParent.representativeDomNodeId, "scroll-parent");
+  assert.equal(scrollParent.tagName, "div");
+  assert.equal(scrollParent.maybeScrollRegion, true);
+  assert.equal(scrollParent.overflowY, "auto");
+  assert.equal(scrollParent.ownedOverflowScopeId, "overflow:1");
+  assert.deepEqual(scrollParent.collapsedDomNodeIds, ["wrapper"]);
+  assert.deepEqual(scrollParent.children.map((child) => child.id), ["item-a", "item-b"]);
+  assert.equal(scrollParent.children[0]?.ctParentId, "scroll-parent");
+  assert.equal(scrollParent.children[1]?.ctParentId, "scroll-parent");
+});
+
+test("maybe scroll region parent does not absorb leaf children", () => {
+  const roots = collapseDomTree([
+    node({ id: "scroll-parent", tagName: "div", width: 100, height: 100, maybeScrollRegion: true, paintOrder: 1 }),
+    node({
+      id: "label",
+      tagName: "span",
+      text: "Visible label",
+      width: 100,
+      height: 20,
+      domParentId: "scroll-parent",
+      paintOrder: 2,
+    }),
+  ]);
+
+  assert.equal(roots[0]?.id, "scroll-parent");
+  assert.deepEqual(roots[0]?.collapsedDomNodeIds, []);
+  assert.equal(roots[0]?.children[0]?.id, "label");
+  assert.equal(roots[0]?.children[0]?.text, "Visible label");
+});
+
+test("maybe scroll region parent only absorbs safe plain wrappers", () => {
+  const collapsed = flattenCollapsedTree(collapseDomTree([
+    node({ id: "preserve-parent", tagName: "div", width: 100, height: 100, maybeScrollRegion: true, paintOrder: 1 }),
+    node({ id: "anchor", tagName: "a", width: 90, height: 90, domParentId: "preserve-parent", paintOrder: 2 }),
+    node({ id: "anchor-child", tagName: "span", width: 20, height: 20, domParentId: "anchor", paintOrder: 3 }),
+
+    node({ id: "scroll-parent", tagName: "div", x: 200, width: 100, height: 100, maybeScrollRegion: true, paintOrder: 1 }),
+    node({
+      id: "scroll-child",
+      tagName: "div",
+      x: 200,
+      width: 90,
+      height: 90,
+      domParentId: "scroll-parent",
+      maybeScrollRegion: true,
+      paintOrder: 2,
+    }),
+    node({ id: "scroll-child-item", tagName: "span", x: 200, width: 20, height: 20, domParentId: "scroll-child", paintOrder: 3 }),
+
+    node({ id: "invisible-parent", tagName: "div", x: 400, width: 100, height: 100, maybeScrollRegion: true, paintOrder: 1 }),
+    node({
+      id: "invisible-boundary",
+      tagName: "div",
+      x: 400,
+      width: 90,
+      height: 90,
+      domParentId: "invisible-parent",
+      isInvisibleOverflowBoundary: true,
+      paintOrder: 2,
+    }),
+    node({ id: "invisible-child", tagName: "span", x: 400, width: 20, height: 20, domParentId: "invisible-boundary", paintOrder: 3 }),
+
+    node({ id: "fixed-parent", tagName: "div", x: 600, width: 100, height: 100, maybeScrollRegion: true, paintOrder: 1 }),
+    node({
+      id: "fixed-wrapper",
+      tagName: "div",
+      x: 600,
+      width: 90,
+      height: 90,
+      domParentId: "fixed-parent",
+      position: "fixed",
+      paintOrder: 2,
+    }),
+    node({ id: "fixed-child", tagName: "span", x: 600, width: 20, height: 20, domParentId: "fixed-wrapper", paintOrder: 3 }),
+  ]));
+
+  assert.equal(collapsed.find((item) => item.id === "anchor")?.ctParentId, "preserve-parent");
+  assert.equal(collapsed.find((item) => item.id === "scroll-child")?.ctParentId, "scroll-parent");
+  assert.equal(collapsed.find((item) => item.id === "invisible-boundary")?.ctParentId, "invisible-parent");
+  assert.equal(collapsed.find((item) => item.id === "fixed-wrapper")?.ctParentId, "fixed-parent");
+});
+
+test("maybe scroll region parent requires contained child wrapper before absorbing", () => {
+  const roots = collapseDomTree([
+    node({ id: "scroll-parent", tagName: "div", width: 100, height: 100, maybeScrollRegion: true, paintOrder: 1 }),
+    node({
+      id: "overflowing-wrapper",
+      tagName: "div",
+      x: -1,
+      width: 100,
+      height: 100,
+      domParentId: "scroll-parent",
+      paintOrder: 2,
+    }),
+    node({ id: "item-a", tagName: "span", width: 20, height: 20, domParentId: "overflowing-wrapper", paintOrder: 3 }),
+    node({ id: "item-b", tagName: "span", x: 30, width: 20, height: 20, domParentId: "overflowing-wrapper", paintOrder: 3 }),
+  ]);
+
+  assert.equal(roots[0]?.id, "scroll-parent");
+  assert.deepEqual(roots[0]?.collapsedDomNodeIds, []);
+  assert.equal(roots[0]?.children[0]?.id, "overflowing-wrapper");
+});
+
 test("maybe scroll region prevents descendants from reparenting outside its clip boundary", () => {
   const tree = buildOverviewTree([
     node({ id: "body", tagName: "body", width: 1000, height: 1000, paintOrder: 1 }),
@@ -739,6 +873,12 @@ function node(overrides: NodeOverrides): DomNodeRecord {
     zIndex: overrides.zIndex,
     isInteractive: overrides.isInteractive ?? false,
     maybeScrollRegion: overrides.maybeScrollRegion ?? false,
+    overflowX: overrides.overflowX ?? "visible",
+    overflowY: overrides.overflowY ?? "visible",
+    boxOverflowScopeId: overrides.boxOverflowScopeId ?? "viewport",
+    ownedOverflowScopeId: overrides.ownedOverflowScopeId,
+    isVisible: overrides.isVisible ?? true,
+    isInvisibleOverflowBoundary: overrides.isInvisibleOverflowBoundary ?? false,
   };
 
   return raw;
@@ -778,6 +918,12 @@ function collapsedTreeNode(
     position: overrides.position ?? "static",
     zIndex: overrides.zIndex,
     maybeScrollRegion: overrides.maybeScrollRegion ?? false,
+    overflowX: overrides.overflowX ?? "visible",
+    overflowY: overrides.overflowY ?? "visible",
+    boxOverflowScopeId: overrides.boxOverflowScopeId ?? "viewport",
+    ownedOverflowScopeId: overrides.ownedOverflowScopeId,
+    isVisible: overrides.isVisible ?? true,
+    isInvisibleOverflowBoundary: overrides.isInvisibleOverflowBoundary ?? false,
     children,
   };
 }

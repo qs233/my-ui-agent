@@ -23,14 +23,10 @@ export type {
   CaptureOverviewOptions,
   CollapsedNode,
   CollapsedTreeNode,
-  DecodedLayoutElement,
-  DecodedLayoutNode,
-  DecodedLayoutText,
   DomNodeId,
   DomNodeRecord,
   LeafNode,
   RawNode,
-  RetainedLayoutElement,
   SerializeOverviewOptions,
   SnapshotDocument,
   SnapshotOptions,
@@ -41,7 +37,7 @@ export type {
 } from "./types.js";
 export { computeIntersectionArea, computeOverlapRatios, intersectsExpandedViewport, isApproximatelyContained } from "./geometry.js";
 export { collapseDomTree } from "./compress.js";
-export { decodeSnapshot, prepareNodes, visibleNodesFromSnapshot } from "./prepare.js";
+export { visibleNodesFromSnapshot } from "./prepare.js";
 export { captureSnapshot } from "./snapshot.js";
 export { serializeOverviewText } from "./serialize.js";
 export { buildVisualContainmentTree } from "./tree.js";
